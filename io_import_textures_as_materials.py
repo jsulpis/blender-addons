@@ -1,8 +1,27 @@
+#----------------------------------------------------------
+# File io_import_textures_as_materials.py
+#----------------------------------------------------------
 import bpy
 
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import CollectionProperty
 from bpy.types import Operator
+  
+
+class MaterialPanel(bpy.types.Panel):
+    """Create a Panel in the Material window"""
+    bl_label = "Material from textures"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context = "material"
+        
+    def draw(self, context):
+        self.layout.operator("import_image.to_material", text="Load textures", icon="FILESEL")
+        
+    @classmethod
+    def poll(cls, context):
+        return context.scene.render.engine == 'CYCLES' and \
+    context.active_object.material_slots.data.active_material
 
 
 class ImportTexturesAsMaterial(Operator, ImportHelper):
@@ -17,19 +36,17 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
 
     def execute(self, context):
         for file in self.files:
-            print(file.name)
+            print("Loaded file: " + file.name)
         return {"FINISHED"}
 
 def register():
     bpy.utils.register_class(ImportTexturesAsMaterial)
+    bpy.utils.register_class(MaterialPanel)
 
 
 def unregister():
     bpy.utils.unregister_class(ImportTexturesAsMaterial)
-
+    bpy.utils.unregister_class(MaterialPanel)
 
 if __name__ == "__main__":
     register()
-
-    # test call
-    bpy.ops.import_image.to_material('INVOKE_DEFAULT')
