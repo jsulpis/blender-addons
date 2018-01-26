@@ -4,8 +4,10 @@
 import bpy
 
 from bpy_extras.io_utils import ImportHelper
-from bpy.props import CollectionProperty
+from bpy.props import CollectionProperty, StringProperty
 from bpy.types import Operator
+
+from bpy_extras.image_utils import load_image
   
 class PbrNodeTree:
     """A class which encapsulates a PBR material node tree"""
@@ -29,6 +31,7 @@ class PbrNodeTree:
     def add_image_texture(self, image, name, location, color_space='NONE'):
         """add an image texture node"""
         imageTexture = self.active_mat.node_tree.nodes.new("ShaderNodeTexImage")
+        imageTexture.image = image
         imageTexture.location = location
         imageTexture.label = name
         imageTexture.color_space = color_space
@@ -90,6 +93,7 @@ class PbrNodeTree:
         """add a displacement map and a math node to adjust the strength"""
         self.nodes["Output"].location.x = 600
         self.add_image_texture(image, "Displacement", (200, -100))
+
         mix_shader = self.active_mat.node_tree.nodes.new("ShaderNodeMath")
         mix_shader.location = (400, -100)
         mix_shader.inputs[0].default_value = 0
@@ -98,9 +102,9 @@ class PbrNodeTree:
         mix_shader.operation = 'MULTIPLY'
         mix_shader.inputs[1].default_value = 1
         self.nodes[name] = mix_shader
+
         self.add_link("Displacement", 0, "Disp strength", 0)
-        self.add_link("Disp strength", 0, "Output", 2)
-        
+        self.add_link("Disp strength", 0, "Output", 2)        
 
     def mix_rgb(self, nodeName1, input1, nodeName2, input2, nodeName3, output):
         """add a mix RGB shader in multiply mode between two existing nodes"""
@@ -134,7 +138,6 @@ class PbrNodeTree:
         for name in ["Diffuse", "Ambient Occlusion", "Metallic", "Roughness", "Glossiness", "Normal", "Bump", "Height"]:
             if name in self.nodes.keys():
                 self.add_link("Mapping", 0, name, 0)
-        
 
     def add_link(self, nodeName1, outputId, nodeName2, inputId):
         """add a link between the two existing nodes"""
@@ -165,7 +168,8 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
     bl_label = "Import Textures As Material"
     bl_options = {'REGISTER', 'UNDO'}
 
-    files = CollectionProperty(name='File paths', type=bpy.types.OperatorFileListElement)
+    files = CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'})
+    directory = StringProperty(maxlen=1024, subtype='FILE_PATH', options={'HIDDEN', 'SKIP_SAVE'})
 
     filename_ext = "*" + ";*".join(bpy.path.extensions_image)
 
@@ -175,25 +179,30 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         active_mat.use_nodes = True
 
         # Fill the material node tree
-        image = None
-        
         node_tree = PbrNodeTree(active_mat)
-            
-        node_tree.add_metallic(image)
-        node_tree.add_ao(image)
-        node_tree.add_diffuse(image)
+        actions = {
+            "Alb": node_tree.add_diffuse,
+            "AO": node_tree.add_ao,
+            "Dif": node_tree.add_diffuse,
+            "Dis": node_tree.add_height,
+            "Nor": node_tree.add_normal,
+            "Rou": node_tree.add_roughness,
+            "Glo": node_tree.add_glossiness,
+            "Met": node_tree.add_metallic,
+            "Bum": node_tree.add_bump
+        }
         
-        #node_tree.add_roughness(image)
-        node_tree.add_glossiness(image)
-        node_tree.add_normal(image)
-        #node_tree.add_bump(image)
-        node_tree.add_height(image)
-        
-        node_tree.add_tex_coord()
-
         for file in self.files:
-            print("Loaded file: " + file.name)
-        return {"FINISHED"}
+            path = self.directory + file.name
+            print("Loading file: " + file.name)
+            image = bpy.data.images.load(path, check_existing=True)
+            extension = file.name.split('.')[0].split("_")[-1]
+            if extension in actions.keys():
+                actions[extension](image)
+   
+        node_tree.add_tex_coord()
+        
+        return {'FINISHED'}
 
 def register():
     bpy.utils.register_class(ImportTexturesAsMaterial)
@@ -208,4 +217,4 @@ if __name__ == "__main__":
     register()
 
     # test call
-    bpy.ops.import_image.to_material('INVOKE_DEFAULT')
+    # bpy.ops.import_image.to_material('INVOKE_DEFAULT')
