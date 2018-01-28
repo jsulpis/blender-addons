@@ -27,6 +27,9 @@ class PbrNodeTree:
         principledShader = self.active_mat.node_tree.nodes.new("ShaderNodeBsdfPrincipled")
         self.nodes["Principled"] = principledShader
         self.active_mat.node_tree.links.new(principledShader.outputs[0], materialOutput.inputs[0])
+        
+        # Add texture coordinates and mapping nodes
+        self.add_tex_coord()
 
     def add_image_texture(self, image, name, location, color_space='NONE'):
         """add an image texture node"""
@@ -36,6 +39,8 @@ class PbrNodeTree:
         imageTexture.label = name
         imageTexture.color_space = color_space
         self.nodes[name] = imageTexture
+        
+        self.add_link("Mapping", 0, name, 0)
         
     def add_diffuse(self, image):
         """add a diffuse map and mix it with the ambient occlusion if it exists"""
@@ -135,15 +140,29 @@ class PbrNodeTree:
         self.nodes["Mapping"] = mapping
         
         self.add_link("Tex Coord", 0, "Mapping", 0)
-        for name in ["Diffuse", "Ambient Occlusion", "Metallic", "Roughness", "Glossiness", "Normal", "Bump", "Height"]:
-            if name in self.nodes.keys():
-                self.add_link("Mapping", 0, name, 0)
 
     def add_link(self, nodeName1, outputId, nodeName2, inputId):
         """add a link between the two existing nodes"""
         node1 = self.nodes[nodeName1]
         node2 = self.nodes[nodeName2]
         self.active_mat.node_tree.links.new(node1.outputs[outputId], node2.inputs[inputId])
+        
+    def add_nodes(self, image):
+        """add one or more nodes depending on the image type"""
+        actions = {
+            "Alb": self.add_diffuse,
+            "AO": self.add_ao,
+            "Dif": self.add_diffuse,
+            "Dis": self.add_height,
+            "Nor": self.add_normal,
+            "Rou": self.add_roughness,
+            "Glo": self.add_glossiness,
+            "Met": self.add_metallic,
+            "Bum": self.add_bump
+        }
+        extension = image.name.split('.')[0].split("_")[-1]
+        if extension in actions.keys():
+            actions[extension](image)
 
 
 class MaterialPanel(bpy.types.Panel):
@@ -154,7 +173,10 @@ class MaterialPanel(bpy.types.Panel):
     bl_context = "material"
         
     def draw(self, context):
-        self.layout.operator("import_image.to_material", text="Load textures", icon="FILESEL")
+        layout = self.layout
+
+        row = layout.row()
+        row.operator("import_image.to_material", text="Load textures", icon="FILESEL")
         
     @classmethod
     def poll(cls, context):
@@ -180,27 +202,12 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
 
         # Fill the material node tree
         node_tree = PbrNodeTree(active_mat)
-        actions = {
-            "Alb": node_tree.add_diffuse,
-            "AO": node_tree.add_ao,
-            "Dif": node_tree.add_diffuse,
-            "Dis": node_tree.add_height,
-            "Nor": node_tree.add_normal,
-            "Rou": node_tree.add_roughness,
-            "Glo": node_tree.add_glossiness,
-            "Met": node_tree.add_metallic,
-            "Bum": node_tree.add_bump
-        }
         
         for file in self.files:
             path = self.directory + file.name
             print("Loading file: " + file.name)
             image = bpy.data.images.load(path, check_existing=True)
-            extension = file.name.split('.')[0].split("_")[-1]
-            if extension in actions.keys():
-                actions[extension](image)
-   
-        node_tree.add_tex_coord()
+            node_tree.add_nodes(image)
         
         return {'FINISHED'}
 
