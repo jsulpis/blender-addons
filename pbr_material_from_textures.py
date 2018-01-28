@@ -1,5 +1,5 @@
 #----------------------------------------------------------
-# File io_import_textures_as_materials.py
+# File pbr_material_from_textures.py
 #----------------------------------------------------------
 
 bl_info = {
@@ -13,11 +13,73 @@ bl_info = {
 import bpy
 
 from bpy_extras.io_utils import ImportHelper
-from bpy.props import CollectionProperty, StringProperty
+from bpy.props import CollectionProperty, StringProperty, EnumProperty, PointerProperty, FloatProperty
 from bpy.types import Operator
 
-from bpy_extras.image_utils import load_image
-  
+
+#--------------------------------------------------------------------------------------------------------
+# Settings
+
+def set_mapping(self, context):
+    """set the texture coordinate mapping"""
+    value = int(self.mapping)
+    tex_coord = context.active_object.active_material.node_tree.nodes["Texture Coordinate"]
+    mapping = context.active_object.active_material.node_tree.nodes["Mapping"]
+    context.active_object.active_material.node_tree.links.new(tex_coord.outputs[value], mapping.inputs[0])
+
+def set_scale(self, context):
+    """set the scale of the texture"""
+    value = self.texture_scale
+    mapping = context.active_object.active_material.node_tree.nodes["Mapping"]
+    mapping.scale[0], mapping.scale[1], mapping.scale[2] = (value, value, value)
+    
+def set_projection(self, context):
+    """set the projection of a 2D image on a 3D object"""
+    value = self.projection
+    for node in bpy.context.active_object.active_material.node_tree.nodes:
+        if node.name.startswith("Image Texture"):
+            node.projection = value    
+
+
+class PBRMaterialSettings(bpy.types.PropertyGroup):
+    """The set of properties to tweak the material"""
+    mapping = bpy.props.EnumProperty(
+        name="Vector",
+        items=[('0', 'Generated', 'Automatically-generated texture coordinates from the vertex positions of the mesh without deformation.'),
+            ('1', 'Normal', 'Object space normal, for texturing objects with the texture staying fixed on the object as it transformed.'),
+            ('2', 'UV', 'UV texture coordinates from the active render UV map.'),
+            ('3', 'Object', 'Position coordinate in object space.'),
+            ('4', 'Camera', 'Position coordinate in camera space.'),
+            ('5', 'Window', 'Location of shading point on the screen, ranging from 0.0 to 1. 0 from the left to right side and bottom to top of the render.'),
+            ('6', 'Reflection', 'Vector in the direction of a sharp reflection, typically used for environment maps.')],
+        description="Calculation of the texture vector",
+        update=set_mapping,
+        default='0',
+    )
+    
+    texture_scale = bpy.props.FloatProperty(
+        name="Texture scale",
+        description="Texture scale",
+        update=set_scale,
+        soft_min=0,
+        step=10,
+        default=1.0
+    )
+    
+    projection = bpy.props.EnumProperty(
+        name="Projection",
+        items=[('FLAT', 'Flat', 'Image is projected flat using the X and Y coordinates of the texture vector.'),
+            ('BOX', 'Box', 'Image is projected using different components for each side of the object space bounding box.'),
+            ('SPHERE', 'Sphere', 'Sphere, Image is projected spherically using the Z axis as central.'),
+            ('TUBE', 'Tube', 'Image is projected from the tube using the Z axis as central.')],
+        description="Method to project 2D image on object with a 3D texture vector",
+        update=set_projection,
+        default='FLAT',
+    )
+
+
+#--------------------------------------------------------------------------------------------------------
+# PBR Node Tree
 class PbrNodeTree:
     """A class which encapsulates a PBR material node tree"""
 
@@ -146,9 +208,11 @@ class PbrNodeTree:
         
         mapping = self.active_mat.node_tree.nodes.new("ShaderNodeMapping")
         mapping.location = (-800, 0)
+        scale = bpy.context.scene.mft_props.texture_scale
+        mapping.scale[0], mapping.scale[1], mapping.scale[2] = (scale, scale, scale)
         self.nodes["Mapping"] = mapping
         
-        self.add_link("Tex Coord", 0, "Mapping", 0)
+        self.add_link("Tex Coord", int(bpy.context.scene.mft_props.mapping), "Mapping", 0)
 
     def add_link(self, nodeName1, outputId, nodeName2, inputId):
         """add a link between the two existing nodes"""
@@ -183,10 +247,19 @@ class MaterialPanel(bpy.types.Panel):
         
     def draw(self, context):
         layout = self.layout
+        mft_props = context.scene.mft_props
 
         row = layout.row()
         row.operator("import_image.to_material", text="Load textures", icon="FILESEL")
+
+        # Mapping      
+        layout.label(text="Mapping")
         
+        row = layout.row()
+        row.prop(mft_props, 'mapping', text="")
+        row.prop(mft_props, 'texture_scale', text="Scale")
+        row.prop(mft_props, 'projection', text="")
+
     @classmethod
     def poll(cls, context):
         return context.scene.render.engine == 'CYCLES' and \
@@ -220,14 +293,20 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         
         return {'FINISHED'}
 
+
 def register():
     bpy.utils.register_class(ImportTexturesAsMaterial)
     bpy.utils.register_class(MaterialPanel)
+    bpy.utils.register_class(PBRMaterialSettings)
 
+    bpy.types.Scene.mft_props = bpy.props.PointerProperty(type=PBRMaterialSettings)
 
 def unregister():
     bpy.utils.unregister_class(ImportTexturesAsMaterial)
     bpy.utils.unregister_class(MaterialPanel)
+    bpy.utils.unregister_class(PBRMaterialSettings)
+    
+    del bpy.types.Scene.mft_props
 
 if __name__ == "__main__":
     register()
