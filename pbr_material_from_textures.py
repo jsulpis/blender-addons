@@ -1,6 +1,15 @@
 #----------------------------------------------------------
 # File io_import_textures_as_materials.py
 #----------------------------------------------------------
+
+bl_info = {
+    "name": "PBR Material from Textures",
+    "author": "Julien Sulpis",
+    "location": "Properties > Material > PBR Material from textures ",
+    "description": "Creates a full PBR material from a set of image textures",
+    "wiki_url": "https://github.com/jsulpis/blender-addons",
+    "category": "Material"}
+
 import bpy
 
 from bpy_extras.io_utils import ImportHelper
@@ -167,7 +176,7 @@ class PbrNodeTree:
 
 class MaterialPanel(bpy.types.Panel):
     """Create a Panel in the Material window"""
-    bl_label = "Material from textures"
+    bl_label = "PBR Material from Textures"
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
     bl_context = "material"
