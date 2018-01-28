@@ -39,6 +39,18 @@ def set_projection(self, context):
     for node in bpy.context.active_object.active_material.node_tree.nodes:
         if node.name.startswith("Image Texture"):
             node.projection = value    
+            
+def set_normal_strength(self, context):
+    """set the strength of the normal map"""
+    value = self.normal_strength
+    normal_map = context.active_object.active_material.node_tree.nodes["Normal Map"]
+    normal_map.inputs[0].default_value = value
+    
+def set_disp_multiplier(self, context):
+    """set the value of of the displacement multiplier"""
+    value = self.disp_multiplier
+    multiplier = context.active_object.active_material.node_tree.nodes["Math"]
+    multiplier.inputs[1].default_value = value
 
 
 class PBRMaterialSettings(bpy.types.PropertyGroup):
@@ -75,6 +87,24 @@ class PBRMaterialSettings(bpy.types.PropertyGroup):
         description="Method to project 2D image on object with a 3D texture vector",
         update=set_projection,
         default='FLAT',
+    )
+    
+    normal_strength = bpy.props.FloatProperty(
+        name="Normal strength",
+        description="Normal strength",
+        update=set_normal_strength,
+        soft_min=0,
+        soft_max=10,
+        step=10,
+        default=1.0
+    )
+    
+    disp_multiplier = bpy.props.FloatProperty(
+        name="Displacement strength",
+        description="Displacement strength",
+        update=set_disp_multiplier,
+        step=10,
+        default=1.0
     )
 
 
@@ -147,6 +177,7 @@ class PbrNodeTree:
         self.add_image_texture(image, "Normal", (-400, -520))
         normalMap = self.active_mat.node_tree.nodes.new("ShaderNodeNormalMap")
         normalMap.location = (-200, -500)
+        normalMap.inputs[0].default_value = bpy.context.scene.mft_props.normal_strength
         self.nodes["Normal Map"] = normalMap
         self.add_link("Normal", 0, "Normal Map", 1)
         self.add_link("Normal Map", 0, "Principled", 17)
@@ -176,7 +207,7 @@ class PbrNodeTree:
         name = "Disp strength"
         mix_shader.label = name
         mix_shader.operation = 'MULTIPLY'
-        mix_shader.inputs[1].default_value = 1
+        mix_shader.inputs[1].default_value = bpy.context.scene.mft_props.disp_multiplier
         self.nodes[name] = mix_shader
 
         self.add_link("Displacement", 0, "Disp strength", 0)
@@ -248,17 +279,43 @@ class MaterialPanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         mft_props = context.scene.mft_props
+        ntree = context.active_object.active_material.node_tree
 
         row = layout.row()
+        row.scale_y = 2
         row.operator("import_image.to_material", text="Load textures", icon="FILESEL")
-
-        # Mapping      
-        layout.label(text="Mapping")
         
-        row = layout.row()
-        row.prop(mft_props, 'mapping', text="")
-        row.prop(mft_props, 'texture_scale', text="Scale")
-        row.prop(mft_props, 'projection', text="")
+        # Mapping
+        box = layout.box()
+        box.label("Mapping")
+        
+        split = box.split()
+        
+        col = split.column()
+        col.label("Vector:")
+        col.prop(mft_props, 'mapping', text="")
+        
+        col = split.column()
+        col.label("Scale:")
+        col.prop(mft_props, 'texture_scale', text="")
+        
+        col = split.column()
+        col.label("Projection:")
+        col.prop(mft_props, 'projection', text="")
+        
+        # Relief strength
+        box = layout.box()
+        box.label("Relief strength")
+        split = box.split()
+
+        col = split.column()
+        col.label("Normal:")
+        col.prop(mft_props, 'normal_strength', text="")
+
+        col = split.column()
+        col.label("Displacement:")
+        col.prop(mft_props, 'disp_multiplier', text="")
+        
 
     @classmethod
     def poll(cls, context):
