@@ -37,22 +37,10 @@ def set_projection(self, context):
     """set the projection of a 2D image on a 3D object"""
     value = self.projection
     for node in bpy.context.active_object.active_material.node_tree.nodes:
-        if node.name.startswith("Image Texture"):
+        if node.type == 'TEX_IMAGE':
             node.projection = value    
-            
-def set_normal_strength(self, context):
-    """set the strength of the normal map"""
-    value = self.normal_strength
-    normal_map = context.active_object.active_material.node_tree.nodes["Normal Map"]
-    normal_map.inputs[0].default_value = value
-    
-def set_disp_multiplier(self, context):
-    """set the value of of the displacement multiplier"""
-    value = self.disp_multiplier
-    multiplier = context.active_object.active_material.node_tree.nodes["Math"]
-    multiplier.inputs[1].default_value = value
-
-
+                
+        
 class PBRMaterialSettings(bpy.types.PropertyGroup):
     """The set of properties to tweak the material"""
     mapping = bpy.props.EnumProperty(
@@ -88,181 +76,172 @@ class PBRMaterialSettings(bpy.types.PropertyGroup):
         update=set_projection,
         default='FLAT',
     )
-    
-    normal_strength = bpy.props.FloatProperty(
-        name="Normal strength",
-        description="Normal strength",
-        update=set_normal_strength,
-        soft_min=0,
-        soft_max=10,
-        step=10,
-        default=1.0
-    )
-    
-    disp_multiplier = bpy.props.FloatProperty(
-        name="Displacement strength",
-        description="Displacement strength",
-        update=set_disp_multiplier,
-        step=10,
-        default=1.0
-    )
 
 
 #--------------------------------------------------------------------------------------------------------
 # PBR Node Tree
 class PbrNodeTree:
     """A class which encapsulates a PBR material node tree"""
-
-    def __init__(self, active_mat):
-        self.active_mat = active_mat
-        self.nodes = {}
+    ntree = bpy.context.active_object.active_material.node_tree
+    nodes = ntree.nodes
+    
+    def __init__(self):
 
         # Clear the current node tree if needed
-        self.active_mat.node_tree.nodes.clear()    
+        PbrNodeTree.nodes.clear()    
 
         # Create a startup node tree : material output and principled shader
-        materialOutput = self.active_mat.node_tree.nodes.new("ShaderNodeOutputMaterial")
+        materialOutput = PbrNodeTree.nodes.new("ShaderNodeOutputMaterial")
         materialOutput.location = (300, 0)
-        self.nodes["Output"] = materialOutput
 
-        principledShader = self.active_mat.node_tree.nodes.new("ShaderNodeBsdfPrincipled")
-        self.nodes["Principled"] = principledShader
-        self.active_mat.node_tree.links.new(principledShader.outputs[0], materialOutput.inputs[0])
+        principledShader = PbrNodeTree.nodes.new("ShaderNodeBsdfPrincipled")
+        PbrNodeTree.add_link("Principled BSDF", 0, "Material Output", 0)
         
         # Add texture coordinates and mapping nodes
-        self.add_tex_coord()
+        PbrNodeTree.add_tex_coord()
 
-    def add_image_texture(self, image, name, location, color_space='NONE'):
+    def add_image_texture(image, name, location, color_space='NONE'):
         """add an image texture node"""
-        imageTexture = self.active_mat.node_tree.nodes.new("ShaderNodeTexImage")
+        imageTexture = PbrNodeTree.nodes.new("ShaderNodeTexImage")
         imageTexture.image = image
         imageTexture.location = location
+        imageTexture.name = name
         imageTexture.label = name
         imageTexture.color_space = color_space
-        self.nodes[name] = imageTexture
         
-        self.add_link("Mapping", 0, name, 0)
+        PbrNodeTree.add_link("Mapping", 0, name, 0)
         
-    def add_diffuse(self, image):
+    def add_diffuse(image):
         """add a diffuse map and mix it with the ambient occlusion if it exists"""
-        self.add_image_texture(image, "Diffuse", (-400, 0), 'COLOR')
-        self.add_link("Diffuse", 0, "Principled", 0)
-        if "Ambient Occlusion" in self.nodes.keys():
-            self.nodes["Diffuse"].location.y = 260
-            self.mix_rgb("Diffuse", 0, "Ambient Occlusion", 0, "Principled", 0)
+        PbrNodeTree.add_image_texture(image, "Diffuse", (-400, 100), 'COLOR')
+        PbrNodeTree.add_link("Diffuse", 0, "Principled BSDF", 0)
+            
+        hue = PbrNodeTree.nodes.new("ShaderNodeHueSaturation")
+        hue.location = (-200, 90)
+        PbrNodeTree.add_link("Diffuse", 0, "Hue", 4)
+        PbrNodeTree.add_link("Hue Saturation Value", 0, "Principled", 0)
         
-    def add_ao(self, image):
+    def add_albedo(image):
+        """add a diffuse map and mix it with the ambient occlusion if it exists"""
+        PbrNodeTree.add_image_texture(image, "Albedo", (-400, 100), 'COLOR')
+        PbrNodeTree.add_link("Albedo", 0, "Principled BSDF", 0)
+            
+        hue = PbrNodeTree.nodes.new("ShaderNodeHueSaturation")
+        hue.location = (-200, 90)
+        PbrNodeTree.add_link("Albedo", 0, "Hue Saturation Value", 4)
+        PbrNodeTree.add_link("Hue Saturation Value", 0, "Principled BSDF", 0)
+            
+        if "Ambient Occlusion" in PbrNodeTree.nodes.keys():
+            PbrNodeTree.nodes["Albedo"].location = (-600, 220)
+            PbrNodeTree.mix_rgb("Albedo", 0, "Ambient Occlusion", 0, "Hue Saturation Value", 4)
+        
+    def add_ao(image):
         """add an ambient occlusion map and mix it with the diffuse if it exists"""
-        self.add_image_texture(image, "Ambient Occlusion", (-400, 0))
-        if "Diffuse" in self.nodes.keys():
-            self.nodes["Diffuse"].location = (-400, 260)
-            self.mix_rgb("Diffuse", 0, "Ambient Occlusion", 0, "Principled", 0)
+        PbrNodeTree.add_image_texture(image, "Ambient Occlusion", (-600, -40))
+        if "Albedo" in PbrNodeTree.nodes.keys():
+            PbrNodeTree.nodes["Albedo"].location = (-600, 220)
+            PbrNodeTree.mix_rgb("Albedo", 0, "Ambient Occlusion", 0, "Hue Saturation Value", 4)
 
-    def add_roughness(self, image):
+    def add_roughness(image):
         """add a roughness map"""
-        self.add_image_texture(image, "Roughness", (-400, -260))
-        self.add_link("Roughness", 0, "Principled", 7)
+        PbrNodeTree.add_image_texture(image, "Roughness", (-400, -260))
+        PbrNodeTree.add_link("Roughness", 0, "Principled BSDF", 7)
         
-    def add_glossiness(self, image):
+    def add_glossiness(image):
         """add a glossiness map"""
-        self.add_image_texture(image, "Glossiness", (-400, -260))
-        invert = self.active_mat.node_tree.nodes.new("ShaderNodeInvert")
+        PbrNodeTree.add_image_texture(image, "Glossiness", (-400, -260))
+        invert = PbrNodeTree.nodes.new("ShaderNodeInvert")
         invert.location = (-200, -340)
-        self.nodes["Invert"] = invert
-        self.add_link("Glossiness", 0, "Invert", 1)
-        self.add_link("Invert", 0, "Principled", 7)
+        PbrNodeTree.add_link("Glossiness", 0, "Invert", 1)
+        PbrNodeTree.add_link("Invert", 0, "Principled BSDF", 7)
         
-    def add_normal(self, image):
+    def add_normal(image):
         """add a normal map texture and a normal map node"""
-        self.add_image_texture(image, "Normal", (-400, -520))
-        normalMap = self.active_mat.node_tree.nodes.new("ShaderNodeNormalMap")
+        PbrNodeTree.add_image_texture(image, "Normal", (-400, -520))
+        normalMap = PbrNodeTree.nodes.new("ShaderNodeNormalMap")
         normalMap.location = (-200, -500)
-        normalMap.inputs[0].default_value = bpy.context.scene.mft_props.normal_strength
-        self.nodes["Normal Map"] = normalMap
-        self.add_link("Normal", 0, "Normal Map", 1)
-        self.add_link("Normal Map", 0, "Principled", 17)
+        PbrNodeTree.add_link("Normal", 0, "Normal Map", 1)
+        PbrNodeTree.add_link("Normal Map", 0, "Principled BSDF", 17)
         
-    def add_bump(self, image):
+    def add_bump(image):
         """add a bump texture and a bump node"""
-        self.add_image_texture(image, "Bump", (-400, -520))
-        normalMap = self.active_mat.node_tree.nodes.new("ShaderNodeBump")
-        normalMap.location = (-200, -500)
-        self.nodes["Bump Map"] = normalMap
-        self.add_link("Bump", 0, "Bump Map", 2)
-        self.add_link("Bump Map", 0, "Principled", 17)
+        PbrNodeTree.add_image_texture(image, "Bump", (-400, -520))
+        bumpMap = PbrNodeTree.nodes.new("ShaderNodeBump")
+        bumpMap.name = "Bump Map"
+        bumpMap.location = (-200, -500)
+        PbrNodeTree.add_link("Bump", 0, "Bump Map", 2)
+        PbrNodeTree.add_link("Bump Map", 0, "Principled BSDF", 17)
         
-    def add_metallic(self, image):
+    def add_metallic(image):
         """add a metallic map"""
-        self.add_image_texture(image, "Metallic", (-200, -80))
-        self.add_link("Metallic", 0, "Principled", 4)
+        PbrNodeTree.add_image_texture(image, "Metallic", (-200, -80))
+        PbrNodeTree.add_link("Metallic", 0, "Principled BSDF", 4)
 
-    def add_height(self, image):
+    def add_height(image):
         """add a displacement map and a math node to adjust the strength"""
-        self.nodes["Output"].location.x = 600
-        self.add_image_texture(image, "Displacement", (200, -100))
+        PbrNodeTree.nodes["Material Output"].location.x = 600
+        PbrNodeTree.add_image_texture(image, "Displacement", (200, -100))
 
-        mix_shader = self.active_mat.node_tree.nodes.new("ShaderNodeMath")
+        mix_shader = PbrNodeTree.nodes.new("ShaderNodeMath")
         mix_shader.location = (400, -100)
         mix_shader.inputs[0].default_value = 0
         name = "Disp strength"
+        mix_shader.name = name
         mix_shader.label = name
         mix_shader.operation = 'MULTIPLY'
-        mix_shader.inputs[1].default_value = bpy.context.scene.mft_props.disp_multiplier
-        self.nodes[name] = mix_shader
+        mix_shader.inputs[1].default_value = 1
 
-        self.add_link("Displacement", 0, "Disp strength", 0)
-        self.add_link("Disp strength", 0, "Output", 2)        
+        PbrNodeTree.add_link("Displacement", 0, "Disp strength", 0)
+        PbrNodeTree.add_link("Disp strength", 0, "Material Output", 2)        
 
-    def mix_rgb(self, nodeName1, input1, nodeName2, input2, nodeName3, output):
+    def mix_rgb(nodeName1, input1, nodeName2, input2, nodeName3, output):
         """add a mix RGB shader in multiply mode between two existing nodes"""
-        mix_shader = self.active_mat.node_tree.nodes.new("ShaderNodeMixRGB")
+        mix_shader = PbrNodeTree.nodes.new("ShaderNodeMixRGB")
         mix_shader.inputs[0].default_value = 1
         
-        location_y = (self.nodes[nodeName1].location.y + self.nodes[nodeName2].location.y) / 2
-        location_x = max(self.nodes[nodeName1].location.x, self.nodes[nodeName2].location.x) + 200
+        location_y = (PbrNodeTree.nodes[nodeName1].location.y + PbrNodeTree.nodes[nodeName2].location.y) / 2
+        location_x = max(PbrNodeTree.nodes[nodeName1].location.x, PbrNodeTree.nodes[nodeName2].location.x) + 200
         mix_shader.location = (location_x, location_y)
         mix_shader.blend_type = 'MULTIPLY'
 
         name = "Mix " + nodeName1[:3] + " - " + nodeName2[:3]
+        mix_shader.name = name
         mix_shader.label = name
 
-        self.nodes[name] = mix_shader
-        self.add_link(nodeName1, input1, name, 1)
-        self.add_link(nodeName2, input2, name, 2)
-        self.add_link(name, 0, nodeName3, output)
+        PbrNodeTree.add_link(nodeName1, input1, name, 1)
+        PbrNodeTree.add_link(nodeName2, input2, name, 2)
+        PbrNodeTree.add_link(name, 0, nodeName3, output)
         
-    def add_tex_coord(self):
+    def add_tex_coord():
         """add a texture coordinate and mapping nodes"""
-        text_coord = self.active_mat.node_tree.nodes.new("ShaderNodeTexCoord")
-        text_coord.location = (-1000, 0)
-        self.nodes["Tex Coord"] = text_coord
+        text_coord = PbrNodeTree.nodes.new("ShaderNodeTexCoord")
+        text_coord.location = (-1200, -40)
         
-        mapping = self.active_mat.node_tree.nodes.new("ShaderNodeMapping")
-        mapping.location = (-800, 0)
+        mapping = PbrNodeTree.nodes.new("ShaderNodeMapping")
+        mapping.location = (-1000, -40)
         scale = bpy.context.scene.mft_props.texture_scale
         mapping.scale[0], mapping.scale[1], mapping.scale[2] = (scale, scale, scale)
-        self.nodes["Mapping"] = mapping
         
-        self.add_link("Tex Coord", int(bpy.context.scene.mft_props.mapping), "Mapping", 0)
+        PbrNodeTree.add_link("Texture Coordinate", int(bpy.context.scene.mft_props.mapping), "Mapping", 0)
 
-    def add_link(self, nodeName1, outputId, nodeName2, inputId):
+    def add_link(nodeName1, outputId, nodeName2, inputId):
         """add a link between the two existing nodes"""
-        node1 = self.nodes[nodeName1]
-        node2 = self.nodes[nodeName2]
-        self.active_mat.node_tree.links.new(node1.outputs[outputId], node2.inputs[inputId])
+        node1 = PbrNodeTree.nodes[nodeName1]
+        node2 = PbrNodeTree.nodes[nodeName2]
+        PbrNodeTree.ntree.links.new(node1.outputs[outputId], node2.inputs[inputId])
         
-    def add_nodes(self, image):
+    def add_nodes(image):
         """add one or more nodes depending on the image type"""
         actions = {
-            "Alb": self.add_diffuse,
-            "AO": self.add_ao,
-            "Dif": self.add_diffuse,
-            "Dis": self.add_height,
-            "Nor": self.add_normal,
-            "Rou": self.add_roughness,
-            "Glo": self.add_glossiness,
-            "Met": self.add_metallic,
-            "Bum": self.add_bump
+            "Alb": PbrNodeTree.add_albedo,
+            "AO": PbrNodeTree.add_ao,
+            "Dif": PbrNodeTree.add_diffuse,
+            "Dis": PbrNodeTree.add_height,
+            "Nor": PbrNodeTree.add_normal,
+            "Rou": PbrNodeTree.add_roughness,
+            "Glo": PbrNodeTree.add_glossiness,
+            "Met": PbrNodeTree.add_metallic,
+            "Bum": PbrNodeTree.add_bump
         }
         extension = image.name.split('.')[0].split("_")[-1]
         if extension in actions.keys():
@@ -310,11 +289,11 @@ class MaterialPanel(bpy.types.Panel):
 
         col = split.column()
         col.label("Normal:")
-        col.prop(mft_props, 'normal_strength', text="")
+        col.prop(ntree.nodes["Normal Map"].inputs[0], 'default_value', text="")
 
         col = split.column()
         col.label("Displacement:")
-        col.prop(mft_props, 'disp_multiplier', text="")
+        col.prop(ntree.nodes["Disp strength"].inputs[1], 'default_value', text="")
         
 
     @classmethod
@@ -340,13 +319,17 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         active_mat.use_nodes = True
 
         # Fill the material node tree
-        node_tree = PbrNodeTree(active_mat)
+        PbrNodeTree()
         
         for file in self.files:
             path = self.directory + file.name
             print("Loading file: " + file.name)
             image = bpy.data.images.load(path, check_existing=True)
-            node_tree.add_nodes(image)
+            PbrNodeTree.add_nodes(image)
+            
+        # Test
+        #PbrNodeTree.add_metallic(None)
+        #PbrNodeTree.add_glossiness(None)
         
         return {'FINISHED'}
 
