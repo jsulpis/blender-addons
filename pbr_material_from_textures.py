@@ -19,7 +19,7 @@ from bpy.types import Operator
 
 #--------------------------------------------------------------------------------------------------------
 # Settings
-
+#--------------------------------------------------------------------------------------------------------
 def set_mapping(self, context):
     """set the texture coordinate mapping"""
     value = int(self.mapping)
@@ -38,10 +38,42 @@ def set_projection(self, context):
     value = self.projection
     for node in bpy.context.active_object.active_material.node_tree.nodes:
         if node.type == 'TEX_IMAGE':
-            node.projection = value    
-                
+            node.projection = value
+
+def set_color_maps(self, context):
+    """set the colors maps to use in the material"""
+    value = self.color_maps
+    # deselect all
+    bpy.ops.object.select_all(action='DESELECT')
+    nodes = context.active_object.active_material.node_tree.nodes
+    if value == 'DIF':
+        if "Diffuse" in nodes.keys():
+            # the diffuse map is already created
+            return
+        if "Ambient Occlusion" in nodes.keys():
+            ao = nodes["Ambient Occlusion"]
+            nodes.remove(ao)
+        if "Mix Alb - Amb" in nodes.keys():
+            mix = nodes["Mix Alb - Amb"]
+            nodes.remove(mix)
+        if "Albedo" in nodes.keys():
+            albedo = nodes["Albedo"]
+            nodes.remove(albedo)
+        image = PbrNodeTree.IMAGES["Dif"]
+        PbrNodeTree.add_diffuse(image)
+    elif value == 'ALB':
+        if "Albedo" in nodes.keys():
+            # the Albedo + AO maps are already created
+            return
+        if "Diffuse" in nodes.keys():
+            diffuse = nodes["Diffuse"]
+            nodes.remove(diffuse)
+        PbrNodeTree.add_albedo(PbrNodeTree.IMAGES["Alb"])
+        PbrNodeTree.add_ao(PbrNodeTree.IMAGES["AO"])
         
-class PBRMaterialSettings(bpy.types.PropertyGroup):
+
+
+class PBRMaterialProperties(bpy.types.PropertyGroup):
     """The set of properties to tweak the material"""
     mapping = bpy.props.EnumProperty(
         name="Vector",
@@ -77,15 +109,26 @@ class PBRMaterialSettings(bpy.types.PropertyGroup):
         default='FLAT',
     )
 
+    color_maps = bpy.props.EnumProperty(
+        name="Color maps",
+        items=[('DIF', 'Diffuse', 'Use only the diffuse map.'),
+            ('ALB', 'Albedo + AO', 'Mix the Albedo and Ambient Occlusion maps.')],
+        description="Which color maps to use",
+        update=set_color_maps,
+        default='ALB',
+    )
+    
 
 #--------------------------------------------------------------------------------------------------------
 # PBR Node Tree
+#--------------------------------------------------------------------------------------------------------
 class PbrNodeTree:
     """A class which encapsulates a PBR material node tree"""
     ntree = bpy.context.active_object.active_material.node_tree
     nodes = ntree.nodes
+    IMAGES = {}
     
-    def __init__(self):
+    def init():
 
         # Clear the current node tree if needed
         PbrNodeTree.nodes.clear()    
@@ -99,6 +142,7 @@ class PbrNodeTree:
         
         # Add texture coordinates and mapping nodes
         PbrNodeTree.add_tex_coord()
+        print(bpy.context.scene.mft_props.color_maps)
 
     def add_image_texture(image, name, location, color_space='NONE'):
         """add an image texture node"""
@@ -111,36 +155,45 @@ class PbrNodeTree:
         
         PbrNodeTree.add_link("Mapping", 0, name, 0)
         
-    def add_diffuse(image):
-        """add a diffuse map and mix it with the ambient occlusion if it exists"""
-        PbrNodeTree.add_image_texture(image, "Diffuse", (-400, 100), 'COLOR')
-        PbrNodeTree.add_link("Diffuse", 0, "Principled BSDF", 0)
-            
+    def add_hsv_node():
+        """add a Hue Saturation Value node"""
         hue = PbrNodeTree.nodes.new("ShaderNodeHueSaturation")
         hue.location = (-200, 90)
-        PbrNodeTree.add_link("Diffuse", 0, "Hue", 4)
-        PbrNodeTree.add_link("Hue Saturation Value", 0, "Principled", 0)
+                
+    def add_diffuse(image):
+        """add a diffuse map and mix it with the ambient occlusion if it exists"""
+        print(bpy.context.scene.mft_props.color_maps)
+        if bpy.context.scene.mft_props.color_maps == 'DIF':
+            PbrNodeTree.add_image_texture(image, "Diffuse", (-400, 100), 'COLOR')
+            PbrNodeTree.add_link("Diffuse", 0, "Principled BSDF", 0)
+                
+            if "Hue Saturation Value" not in PbrNodeTree.nodes.keys():
+                PbrNodeTree.add_hsv_node()
+            PbrNodeTree.add_link("Hue Saturation Value", 0, "Principled BSDF", 0)
+            PbrNodeTree.add_link("Diffuse", 0, "Hue Saturation Value", 4)
         
     def add_albedo(image):
         """add a diffuse map and mix it with the ambient occlusion if it exists"""
-        PbrNodeTree.add_image_texture(image, "Albedo", (-400, 100), 'COLOR')
-        PbrNodeTree.add_link("Albedo", 0, "Principled BSDF", 0)
-            
-        hue = PbrNodeTree.nodes.new("ShaderNodeHueSaturation")
-        hue.location = (-200, 90)
-        PbrNodeTree.add_link("Albedo", 0, "Hue Saturation Value", 4)
-        PbrNodeTree.add_link("Hue Saturation Value", 0, "Principled BSDF", 0)
-            
-        if "Ambient Occlusion" in PbrNodeTree.nodes.keys():
-            PbrNodeTree.nodes["Albedo"].location = (-600, 220)
-            PbrNodeTree.mix_rgb("Albedo", 0, "Ambient Occlusion", 0, "Hue Saturation Value", 4)
+        if bpy.context.scene.mft_props.color_maps == 'ALB':
+            PbrNodeTree.add_image_texture(image, "Albedo", (-400, 100), 'COLOR')
+            PbrNodeTree.add_link("Albedo", 0, "Principled BSDF", 0)
+                
+            if "Hue Saturation Value" not in PbrNodeTree.nodes.keys():
+                PbrNodeTree.add_hsv_node()
+            PbrNodeTree.add_link("Hue Saturation Value", 0, "Principled BSDF", 0)
+            PbrNodeTree.add_link("Albedo", 0, "Hue Saturation Value", 4)
+                
+            if "Ambient Occlusion" in PbrNodeTree.nodes.keys():
+                PbrNodeTree.nodes["Albedo"].location = (-600, 220)
+                PbrNodeTree.mix_rgb("Albedo", 0, "Ambient Occlusion", 0, "Hue Saturation Value", 4)
         
     def add_ao(image):
         """add an ambient occlusion map and mix it with the diffuse if it exists"""
-        PbrNodeTree.add_image_texture(image, "Ambient Occlusion", (-600, -40))
-        if "Albedo" in PbrNodeTree.nodes.keys():
-            PbrNodeTree.nodes["Albedo"].location = (-600, 220)
-            PbrNodeTree.mix_rgb("Albedo", 0, "Ambient Occlusion", 0, "Hue Saturation Value", 4)
+        if bpy.context.scene.mft_props.color_maps == 'ALB':
+            PbrNodeTree.add_image_texture(image, "Ambient Occlusion", (-600, -40))
+            if "Albedo" in PbrNodeTree.nodes.keys():
+                PbrNodeTree.nodes["Albedo"].location = (-600, 220)
+                PbrNodeTree.mix_rgb("Albedo", 0, "Ambient Occlusion", 0, "Hue Saturation Value", 4)
 
     def add_roughness(image):
         """add a roughness map"""
@@ -230,8 +283,9 @@ class PbrNodeTree:
         node2 = PbrNodeTree.nodes[nodeName2]
         PbrNodeTree.ntree.links.new(node1.outputs[outputId], node2.inputs[inputId])
         
-    def add_nodes(image):
-        """add one or more nodes depending on the image type"""
+    @staticmethod
+    def fill_tree():
+        """create the nodes according to the available maps"""
         actions = {
             "Alb": PbrNodeTree.add_albedo,
             "AO": PbrNodeTree.add_ao,
@@ -243,11 +297,15 @@ class PbrNodeTree:
             "Met": PbrNodeTree.add_metallic,
             "Bum": PbrNodeTree.add_bump
         }
-        extension = image.name.split('.')[0].split("_")[-1]
-        if extension in actions.keys():
-            actions[extension](image)
+        for extension, image in PbrNodeTree.IMAGES.items():
+            print(extension)
+            if extension in actions.keys():
+                actions[extension](image)
 
 
+#--------------------------------------------------------------------------------------------------------
+# Panel
+#--------------------------------------------------------------------------------------------------------
 class MaterialPanel(bpy.types.Panel):
     """Create a Panel in the Material window"""
     bl_label = "PBR Material from Textures"
@@ -294,6 +352,32 @@ class MaterialPanel(bpy.types.Panel):
         col = split.column()
         col.label("Displacement:")
         col.prop(ntree.nodes["Disp strength"].inputs[1], 'default_value', text="")
+
+        # Color
+        box = layout.box()
+        box.label("Color")
+        
+        dif, alb = False, False
+        for extension in PbrNodeTree.IMAGES.keys():
+            if extension == "Dif":
+                dif = True
+            elif extension == "Alb":
+                alb = True
+        if dif and alb:
+            row = box.row()
+            row.prop(mft_props, 'color_maps', expand=True)
+        
+        split = box.split()
+        
+        col = split.column(align=True)
+        col.prop(ntree.nodes["Hue Saturation Value"].inputs[0], 'default_value', text="Hue")
+        col.prop(ntree.nodes["Hue Saturation Value"].inputs[1], 'default_value', text="Saturation")
+        col.prop(ntree.nodes["Hue Saturation Value"].inputs[2], 'default_value', text="Value")
+        
+        if bpy.context.scene.mft_props.color_maps == 'ALB':
+            col = split.column()
+            col.label("Alb - AO Mix:")
+            col.prop(ntree.nodes["Mix Alb - Amb"].inputs[0], 'default_value', text="")
         
 
     @classmethod
@@ -302,6 +386,9 @@ class MaterialPanel(bpy.types.Panel):
     context.active_object.material_slots.data.active_material
 
 
+#--------------------------------------------------------------------------------------------------------
+# Operator
+#--------------------------------------------------------------------------------------------------------
 class ImportTexturesAsMaterial(Operator, ImportHelper):
     """Load textures into a generated node tree to automate PBR material creation"""
     bl_idname = "import_image.to_material"
@@ -318,14 +405,31 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         active_mat = bpy.context.active_object.active_material
         active_mat.use_nodes = True
 
-        # Fill the material node tree
-        PbrNodeTree()
-        
+        # Retrieve the images and their extension (type)
+        images = {}
         for file in self.files:
             path = self.directory + file.name
             print("Loading file: " + file.name)
             image = bpy.data.images.load(path, check_existing=True)
-            PbrNodeTree.add_nodes(image)
+            extension = image.name.split('.')[0].split("_")[-1]
+            images[extension] = image
+        
+        # Set the color map property (Diffuse or Albedo + AO)
+        dif, alb = False, False
+        for extension in images.keys():
+            if extension == "Dif":
+                dif = True
+            elif extension == "Alb":
+                alb = True
+        if dif and not alb:
+            bpy.context.scene.mft_props.color_maps = 'DIF'
+        elif alb and not dif:
+            bpy.context.scene.mft_props.color_maps = 'ALB'
+        
+        # Fill the node tree
+        PbrNodeTree.init()
+        PbrNodeTree.IMAGES = images
+        PbrNodeTree.fill_tree()
             
         # Test
         #PbrNodeTree.add_metallic(None)
@@ -337,14 +441,15 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
 def register():
     bpy.utils.register_class(ImportTexturesAsMaterial)
     bpy.utils.register_class(MaterialPanel)
-    bpy.utils.register_class(PBRMaterialSettings)
+    bpy.utils.register_class(PBRMaterialProperties)
 
-    bpy.types.Scene.mft_props = bpy.props.PointerProperty(type=PBRMaterialSettings)
+    bpy.types.Scene.mft_props = bpy.props.PointerProperty(type=PBRMaterialProperties)
+    
 
 def unregister():
     bpy.utils.unregister_class(ImportTexturesAsMaterial)
     bpy.utils.unregister_class(MaterialPanel)
-    bpy.utils.unregister_class(PBRMaterialSettings)
+    bpy.utils.unregister_class(PBRMaterialProperties)
     
     del bpy.types.Scene.mft_props
 
