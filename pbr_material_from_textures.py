@@ -13,8 +13,8 @@ bl_info = {
 import bpy
 
 from bpy_extras.io_utils import ImportHelper
-from bpy.props import CollectionProperty, StringProperty, EnumProperty, PointerProperty, FloatProperty
-from bpy.types import Operator
+from bpy.props import CollectionProperty, StringProperty, IntProperty, BoolProperty, EnumProperty, PointerProperty, FloatProperty
+from bpy.types import Operator, AddonPreferences
 
 
 #--------------------------------------------------------------------------------------------------------
@@ -124,12 +124,15 @@ class PBRMaterialProperties(bpy.types.PropertyGroup):
 #--------------------------------------------------------------------------------------------------------
 class PbrNodeTree:
     """A class which encapsulates a PBR material node tree"""
-    ntree = bpy.context.active_object.active_material.node_tree
-    nodes = ntree.nodes
+    
     IMAGES = {}
     
     def init():
 
+        # Create the class attributes
+        PbrNodeTree.ntree = bpy.context.active_object.active_material.node_tree
+        PbrNodeTree.nodes = PbrNodeTree.ntree.nodes
+        
         # Clear the current node tree if needed
         PbrNodeTree.nodes.clear()    
 
@@ -142,7 +145,6 @@ class PbrNodeTree:
         
         # Add texture coordinates and mapping nodes
         PbrNodeTree.add_tex_coord()
-        print(bpy.context.scene.mft_props.color_maps)
 
     def add_image_texture(image, name, location, color_space='NONE'):
         """add an image texture node"""
@@ -162,7 +164,6 @@ class PbrNodeTree:
                 
     def add_diffuse(image):
         """add a diffuse map and mix it with the ambient occlusion if it exists"""
-        print(bpy.context.scene.mft_props.color_maps)
         if bpy.context.scene.mft_props.color_maps == 'DIF':
             PbrNodeTree.add_image_texture(image, "Diffuse", (-400, 100), 'COLOR')
             PbrNodeTree.add_link("Diffuse", 0, "Principled BSDF", 0)
@@ -298,7 +299,6 @@ class PbrNodeTree:
             "Bum": PbrNodeTree.add_bump
         }
         for extension, image in PbrNodeTree.IMAGES.items():
-            print(extension)
             if extension in actions.keys():
                 actions[extension](image)
 
@@ -321,6 +321,10 @@ class MaterialPanel(bpy.types.Panel):
         row = layout.row()
         row.scale_y = 2
         row.operator("import_image.to_material", text="Load textures", icon="FILESEL")
+        
+        if not PbrNodeTree.IMAGES:
+            # no map imported
+            return
         
         # Mapping
         box = layout.box()
@@ -406,25 +410,10 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         active_mat.use_nodes = True
 
         # Retrieve the images and their extension (type)
-        images = {}
-        for file in self.files:
-            path = self.directory + file.name
-            print("Loading file: " + file.name)
-            image = bpy.data.images.load(path, check_existing=True)
-            extension = image.name.split('.')[0].split("_")[-1]
-            images[extension] = image
+        images = self.sort_files(context, self.files, self.directory)                
         
         # Set the color map property (Diffuse or Albedo + AO)
-        dif, alb = False, False
-        for extension in images.keys():
-            if extension == "Dif":
-                dif = True
-            elif extension == "Alb":
-                alb = True
-        if dif and not alb:
-            bpy.context.scene.mft_props.color_maps = 'DIF'
-        elif alb and not dif:
-            bpy.context.scene.mft_props.color_maps = 'ALB'
+        self.set_color_maps(images)
         
         # Fill the node tree
         PbrNodeTree.init()
@@ -436,25 +425,123 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         #PbrNodeTree.add_glossiness(None)
         
         return {'FINISHED'}
+    
+    def sort_files(self, context, files, directory):
+        """find the type (Diffuse, etc) of each map and return a dictionnary with each map associated to a type"""
+        images = {}
+        prefs = context.user_preferences.addons['pbr_material_from_textures'].preferences
+        suffixes = {
+            'diffuse_suffixes': 'Dif', 
+            'albedo_suffixes': 'Alb', 
+            'ao_suffixes': 'AO', 
+            'roughness_suffixes': 'Rou', 
+            'glossiness_suffixes': 'Glo', 
+            'normal_suffixes': 'Nor', 
+            'bump_suffixes': 'Bum', 
+            'height_suffixes': 'Dis', 
+            'metallic_suffixes': 'Met'
+        }
+        for file in files:
+            path = directory + file.name
+            print("Loading file: " + file.name)
+            image = bpy.data.images.load(path, check_existing=True)
+            extension = image.name.split('.')[0].split('_')[-1]
+            # Poliigon variations
+            if 'k' in extension.lower():
+                # this is the resolution (like 3K)
+                extension = image.name.split('.')[0].split('_')[-2]
+                if "var" in extension.lower():
+                    # this is the variation (VAR1 or VAR2) 
+                    extension = image.name.split('.')[0].split('_')[-3]
+                    
+            for type in suffixes.keys():
+                if extension in prefs[type].split(';'):
+                    suffix = suffixes[type]
+                    images[suffix] = image
+        return images
+
+    def set_color_maps(self, images):
+        """ Set the color map property (Diffuse or Albedo + AO) """
+        dif, alb = False, False
+        for extension in images.keys():
+            if extension == "Dif":
+                dif = True
+            elif extension == "Alb":
+                alb = True
+        if dif and not alb:
+            bpy.context.scene.mft_props.color_maps = 'DIF'
+        elif alb and not dif:
+            bpy.context.scene.mft_props.color_maps = 'ALB'
 
 
+#--------------------------------------------------------------------------------------------------------
+# Addon Preferences
+#--------------------------------------------------------------------------------------------------------
+class AddonPreferences(AddonPreferences):
+    bl_idname = __name__
+
+    diffuse_suffixes = StringProperty(name="Diffuse")
+    albedo_suffixes = StringProperty(name="Albedo")
+    ao_suffixes = StringProperty(name="Ambient Occlusion")
+    roughness_suffixes = StringProperty(name="Roughness")
+    glossiness_suffixes = StringProperty(name="Glossiness")
+    normal_suffixes = StringProperty(name="Normal")
+    bump_suffixes = StringProperty(name="Bump")
+    height_suffixes = StringProperty(name="Height")
+    metallic_suffixes = StringProperty(name="Metallic")
+    
+    show_suffixes = BoolProperty(name="File suffixes")
+
+    def draw(self, context):
+        layout = self.layout
+        
+        if not self.show_suffixes:
+            layout.prop(self, "show_suffixes", icon="TRIA_RIGHT")
+            
+        else:
+            layout.prop(self, "show_suffixes", icon="TRIA_DOWN")
+            layout.label(text="Set the suffixes to use for each map, separated with semicolons.")
+            
+            layout.prop(self, "diffuse_suffixes")
+            layout.prop(self, "albedo_suffixes")
+            layout.prop(self, "ao_suffixes")
+            layout.prop(self, "roughness_suffixes")
+            layout.prop(self, "glossiness_suffixes")
+            layout.prop(self, "normal_suffixes")
+            layout.prop(self, "bump_suffixes")
+            layout.prop(self, "height_suffixes")
+            layout.prop(self, "metallic_suffixes")
+
+    @staticmethod
+    def init():
+        """set the default values for the file suffixes"""
+        prefs = bpy.context.user_preferences.addons['pbr_material_from_textures'].preferences
+        prefs["diffuse_suffixes"] = "Dif;Diffuse;BaseColor;COL"
+        prefs["albedo_suffixes"] = "Alb;Albedo"
+        prefs["ao_suffixes"] = "AO"
+        prefs["roughness_suffixes"] = "Rou;Roughness"
+        prefs["glossiness_suffixes"] = "Gloss;Glossiness;GLOSS"
+        prefs["normal_suffixes"] = "Nor;Normal;NRM"
+        prefs["bump_suffixes"] = "Bump"
+        prefs["height_suffixes"] = "Dis;Height;DISP"
+        prefs["metallic_suffixes"] = "Met;Metallic"
+
+
+#--------------------------------------------------------------------------------------------------------
+# Register
+#--------------------------------------------------------------------------------------------------------
 def register():
-    bpy.utils.register_class(ImportTexturesAsMaterial)
-    bpy.utils.register_class(MaterialPanel)
-    bpy.utils.register_class(PBRMaterialProperties)
+    bpy.utils.register_module(__name__)
 
     bpy.types.Scene.mft_props = bpy.props.PointerProperty(type=PBRMaterialProperties)
+    AddonPreferences.init()
     
 
 def unregister():
-    bpy.utils.unregister_class(ImportTexturesAsMaterial)
-    bpy.utils.unregister_class(MaterialPanel)
-    bpy.utils.unregister_class(PBRMaterialProperties)
+    bpy.utils.unregister_module(__name__)
     
     del bpy.types.Scene.mft_props
 
 if __name__ == "__main__":
     register()
-
-    # test call
-    # bpy.ops.import_image.to_material('INVOKE_DEFAULT')
+    
