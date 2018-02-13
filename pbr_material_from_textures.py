@@ -40,36 +40,18 @@ def set_projection(self, context):
         if node.type == 'TEX_IMAGE':
             node.projection = value
 
-def set_color_maps(self, context):
+def set_color_map(self, context):
     """set the colors maps to use in the material"""
-    value = self.color_maps
+    value = self.color_map
     # deselect all
     bpy.ops.object.select_all(action='DESELECT')
     nodes = context.active_object.active_material.node_tree.nodes
     if value == 'DIF':
-        if "Diffuse" in nodes.keys():
-            # the diffuse map is already created
-            return
-        if "Ambient Occlusion" in nodes.keys():
-            ao = nodes["Ambient Occlusion"]
-            nodes.remove(ao)
-        if "Mix Alb - Amb" in nodes.keys():
-            mix = nodes["Mix Alb - Amb"]
-            nodes.remove(mix)
-        if "Albedo" in nodes.keys():
-            albedo = nodes["Albedo"]
-            nodes.remove(albedo)
         image = PbrNodeTree.IMAGES["Dif"]
-        PbrNodeTree.add_diffuse(image)
+        PbrNodeTree.nodes["Color"].image = image
     elif value == 'ALB':
-        if "Albedo" in nodes.keys():
-            # the Albedo + AO maps are already created
-            return
-        if "Diffuse" in nodes.keys():
-            diffuse = nodes["Diffuse"]
-            nodes.remove(diffuse)
-        PbrNodeTree.add_albedo(PbrNodeTree.IMAGES["Alb"])
-        PbrNodeTree.add_ao(PbrNodeTree.IMAGES["AO"])
+        image = PbrNodeTree.IMAGES["Alb"]
+        PbrNodeTree.nodes["Color"].image = image
         
 
 
@@ -109,12 +91,12 @@ class PBRMaterialProperties(bpy.types.PropertyGroup):
         default='FLAT',
     )
 
-    color_maps = bpy.props.EnumProperty(
-        name="Color maps",
-        items=[('DIF', 'Diffuse', 'Use only the diffuse map.'),
-            ('ALB', 'Albedo + AO', 'Mix the Albedo and Ambient Occlusion maps.')],
-        description="Which color maps to use",
-        update=set_color_maps,
+    color_map = bpy.props.EnumProperty(
+        name="Color map",
+        items=[('DIF', 'Diffuse', 'Use the diffuse map.'),
+            ('ALB', 'Albedo', 'Use the albedo map.')],
+        description="Which color map to use",
+        update=set_color_map,
         default='ALB',
     )
     
@@ -161,40 +143,29 @@ class PbrNodeTree:
         """add a Hue Saturation Value node"""
         hue = PbrNodeTree.nodes.new("ShaderNodeHueSaturation")
         hue.location = (-200, 90)
-                
-    def add_diffuse(image):
-        """add a diffuse map and mix it with the ambient occlusion if it exists"""
-        if bpy.context.scene.mft_props.color_maps == 'DIF':
-            PbrNodeTree.add_image_texture(image, "Diffuse", (-400, 100), 'COLOR')
-            PbrNodeTree.add_link("Diffuse", 0, "Principled BSDF", 0)
-                
-            if "Hue Saturation Value" not in PbrNodeTree.nodes.keys():
-                PbrNodeTree.add_hsv_node()
-            PbrNodeTree.add_link("Hue Saturation Value", 0, "Principled BSDF", 0)
-            PbrNodeTree.add_link("Diffuse", 0, "Hue Saturation Value", 4)
         
-    def add_albedo(image):
-        """add a diffuse map and mix it with the ambient occlusion if it exists"""
-        if bpy.context.scene.mft_props.color_maps == 'ALB':
-            PbrNodeTree.add_image_texture(image, "Albedo", (-400, 100), 'COLOR')
-            PbrNodeTree.add_link("Albedo", 0, "Principled BSDF", 0)
+    def add_color(image):
+        """add a color map and mix it with the ambient occlusion if it exists"""
+        if "Color" in PbrNodeTree.nodes.keys():
+            return
+        PbrNodeTree.add_image_texture(image, "Color", (-400, 100), 'COLOR')
+        PbrNodeTree.add_link("Color", 0, "Principled BSDF", 0)
                 
-            if "Hue Saturation Value" not in PbrNodeTree.nodes.keys():
-                PbrNodeTree.add_hsv_node()
-            PbrNodeTree.add_link("Hue Saturation Value", 0, "Principled BSDF", 0)
-            PbrNodeTree.add_link("Albedo", 0, "Hue Saturation Value", 4)
+        if "Hue Saturation Value" not in PbrNodeTree.nodes.keys():
+            PbrNodeTree.add_hsv_node()
+        PbrNodeTree.add_link("Hue Saturation Value", 0, "Principled BSDF", 0)
+        PbrNodeTree.add_link("Color", 0, "Hue Saturation Value", 4)
                 
-            if "Ambient Occlusion" in PbrNodeTree.nodes.keys():
-                PbrNodeTree.nodes["Albedo"].location = (-600, 220)
-                PbrNodeTree.mix_rgb("Albedo", 0, "Ambient Occlusion", 0, "Hue Saturation Value", 4)
+        if "Ambient Occlusion" in PbrNodeTree.nodes.keys():
+            PbrNodeTree.nodes["Color"].location = (-600, 220)
+            PbrNodeTree.mix_rgb("Color", 0, "Ambient Occlusion", 0, "Hue Saturation Value", 4)
         
     def add_ao(image):
         """add an ambient occlusion map and mix it with the diffuse if it exists"""
-        if bpy.context.scene.mft_props.color_maps == 'ALB':
-            PbrNodeTree.add_image_texture(image, "Ambient Occlusion", (-600, -40))
-            if "Albedo" in PbrNodeTree.nodes.keys():
-                PbrNodeTree.nodes["Albedo"].location = (-600, 220)
-                PbrNodeTree.mix_rgb("Albedo", 0, "Ambient Occlusion", 0, "Hue Saturation Value", 4)
+        PbrNodeTree.add_image_texture(image, "Ambient Occlusion", (-600, -40))
+        if "Color" in PbrNodeTree.nodes.keys():
+            PbrNodeTree.nodes["Color"].location = (-600, 220)
+            PbrNodeTree.mix_rgb("Color", 0, "Ambient Occlusion", 0, "Hue Saturation Value", 4)
 
     def add_roughness(image):
         """add a roughness map"""
@@ -288,9 +259,9 @@ class PbrNodeTree:
     def fill_tree():
         """create the nodes according to the available maps"""
         actions = {
-            "Alb": PbrNodeTree.add_albedo,
+            "Alb": PbrNodeTree.add_color,
             "AO": PbrNodeTree.add_ao,
-            "Dif": PbrNodeTree.add_diffuse,
+            "Dif": PbrNodeTree.add_color,
             "Dis": PbrNodeTree.add_height,
             "Nor": PbrNodeTree.add_normal,
             "Rou": PbrNodeTree.add_roughness,
@@ -369,7 +340,7 @@ class MaterialPanel(bpy.types.Panel):
                 alb = True
         if dif and alb:
             row = box.row()
-            row.prop(mft_props, 'color_maps', expand=True)
+            row.prop(mft_props, 'color_map', expand=True)
         
         split = box.split()
         
@@ -378,10 +349,10 @@ class MaterialPanel(bpy.types.Panel):
         col.prop(ntree.nodes["Hue Saturation Value"].inputs[1], 'default_value', text="Saturation")
         col.prop(ntree.nodes["Hue Saturation Value"].inputs[2], 'default_value', text="Value")
         
-        if bpy.context.scene.mft_props.color_maps == 'ALB':
+        if "Ambient Occlusion" in ntree.nodes.keys():
             col = split.column()
-            col.label("Alb - AO Mix:")
-            col.prop(ntree.nodes["Mix Alb - Amb"].inputs[0], 'default_value', text="")
+            col.label("AO Mix:")
+            col.prop(ntree.nodes["Mix Col - Amb"].inputs[0], 'default_value', text="")
         
 
     @classmethod
@@ -412,8 +383,8 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         # Retrieve the images and their extension (type)
         images = self.sort_files(context, self.files, self.directory)                
         
-        # Set the color map property (Diffuse or Albedo + AO)
-        self.set_color_maps(images)
+        # Set the color map property (Diffuse or Albedo) if there is only one color map
+        self.set_color_map(images)
         
         # Fill the node tree
         PbrNodeTree.init()
@@ -445,23 +416,34 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
             path = directory + file.name
             print("Loading file: " + file.name)
             image = bpy.data.images.load(path, check_existing=True)
-            extension = image.name.split('.')[0].split('_')[-1]
-            # Poliigon variations
+            name_list = image.name.split('.')[0].split('_')
+            extension = name_list[-1]
+            
+            # Name variations
             if 'k' in extension.lower():
-                # this is the resolution (like 3K)
-                extension = image.name.split('.')[0].split('_')[-2]
-                if "var" in extension.lower():
-                    # this is the variation (VAR1 or VAR2) 
-                    extension = image.name.split('.')[0].split('_')[-3]
+                # the last part of the name is probably the resolution (like 4K)
+                if len(name_list) == 4:
+                    # This is probably a Poliigon texture of either Color or Displacement
+                    if name_list[1] == 'COL' and name_list[2] == 'VAR1':
+                        images["Dif"] = image
+                    elif name_list[1] == 'COL' and name_list[2] == 'VAR2':
+                        images["Alb"] = image
+                    elif name_list[1] == 'DISP':
+                        images["Dis"] = image
+                else:
+                    # The extension we want should be before the resolution
+                    extension = name_list[-2]
                     
+            print(extension)
             for type in suffixes.keys():
                 if extension in prefs[type].split(';'):
+                    print(extension)
                     suffix = suffixes[type]
                     images[suffix] = image
         return images
 
-    def set_color_maps(self, images):
-        """ Set the color map property (Diffuse or Albedo + AO) """
+    def set_color_map(self, images):
+        """ Set the color map property (Diffuse or Albedo) """
         dif, alb = False, False
         for extension in images.keys():
             if extension == "Dif":
@@ -469,9 +451,9 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
             elif extension == "Alb":
                 alb = True
         if dif and not alb:
-            bpy.context.scene.mft_props.color_maps = 'DIF'
+            bpy.context.scene.mft_props.color_map = 'DIF'
         elif alb and not dif:
-            bpy.context.scene.mft_props.color_maps = 'ALB'
+            bpy.context.scene.mft_props.color_map = 'ALB'
 
 
 #--------------------------------------------------------------------------------------------------------
@@ -516,7 +498,7 @@ class AddonPreferences(AddonPreferences):
     def init():
         """set the default values for the file suffixes"""
         prefs = bpy.context.user_preferences.addons['pbr_material_from_textures'].preferences
-        prefs["diffuse_suffixes"] = "Dif;Diffuse;BaseColor;COL"
+        prefs["diffuse_suffixes"] = "Dif;Diffuse;BaseColor"
         prefs["albedo_suffixes"] = "Alb;Albedo"
         prefs["ao_suffixes"] = "AO"
         prefs["roughness_suffixes"] = "Rou;Roughness"
