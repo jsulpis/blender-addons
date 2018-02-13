@@ -169,11 +169,15 @@ class PbrNodeTree:
 
     def add_roughness(image):
         """add a roughness map"""
+        if "Glossiness" in PbrNodeTree.nodes.keys():
+            return
         PbrNodeTree.add_image_texture(image, "Roughness", (-400, -260))
         PbrNodeTree.add_link("Roughness", 0, "Principled BSDF", 7)
         
     def add_glossiness(image):
         """add a glossiness map"""
+        if "Roughness" in PbrNodeTree.nodes.keys():
+            return
         PbrNodeTree.add_image_texture(image, "Glossiness", (-400, -260))
         invert = PbrNodeTree.nodes.new("ShaderNodeInvert")
         invert.location = (-200, -340)
@@ -286,8 +290,6 @@ class MaterialPanel(bpy.types.Panel):
         
     def draw(self, context):
         layout = self.layout
-        mft_props = context.scene.mft_props
-        ntree = context.active_object.active_material.node_tree
 
         row = layout.row()
         row.scale_y = 2
@@ -296,6 +298,9 @@ class MaterialPanel(bpy.types.Panel):
         if not PbrNodeTree.IMAGES:
             # no map imported
             return
+        
+        mft_props = context.scene.mft_props
+        ntree = context.active_object.active_material.node_tree
         
         # Mapping
         box = layout.box()
@@ -357,8 +362,7 @@ class MaterialPanel(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return context.scene.render.engine == 'CYCLES' and \
-    context.active_object.material_slots.data.active_material
+        return context.scene.render.engine == 'CYCLES'
 
 
 #--------------------------------------------------------------------------------------------------------
@@ -376,9 +380,10 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
     filename_ext = "*" + ";*".join(bpy.path.extensions_image)
 
     def execute(self, context):
-        # Retrieve the current material
-        active_mat = bpy.context.active_object.active_material
-        active_mat.use_nodes = True
+        # Create a new material
+        new_material = bpy.data.materials.new(name=self.get_material_name())
+        new_material.use_nodes = True
+        bpy.context.active_object.active_material = new_material
 
         # Retrieve the images and their extension (type)
         images = self.sort_files(context, self.files, self.directory)                
@@ -396,6 +401,20 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         #PbrNodeTree.add_glossiness(None)
         
         return {'FINISHED'}
+    
+    def get_material_name(self):
+        """find the name of the material based on the textures name"""
+        name1 = self.files[0].name.split('_')
+        name2 = self.files[1].name.split('_')
+        intersection = set(name1).intersection(name2)
+        name = ""
+        for elt in intersection:
+            elt = elt[0].upper() + elt[1:].lower()
+            if "k" in elt:
+                # there is the resolution of the texture, we don't want it
+                continue
+            name += " " + elt
+        return name
     
     def sort_files(self, context, files, directory):
         """find the type (Diffuse, etc) of each map and return a dictionnary with each map associated to a type"""
@@ -434,10 +453,8 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
                     # The extension we want should be before the resolution
                     extension = name_list[-2]
                     
-            print(extension)
             for type in suffixes.keys():
                 if extension in prefs[type].split(';'):
-                    print(extension)
                     suffix = suffixes[type]
                     images[suffix] = image
         return images
