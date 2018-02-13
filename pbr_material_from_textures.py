@@ -405,7 +405,7 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
     def get_material_name(self):
         """find the name of the material based on the textures name"""
         name1 = self.files[0].name.split('_')
-        name2 = self.files[1].name.split('_')
+        name2 = self.files[-1].name.split('_')
         intersection = set(name1).intersection(name2)
         name = ""
         for elt in intersection:
@@ -439,7 +439,7 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
             extension = name_list[-1]
             
             # Name variations
-            if 'k' in extension.lower():
+            if 'k' in extension.lower() or "hires" == extension.lower():
                 # the last part of the name is probably the resolution (like 4K)
                 if len(name_list) == 4:
                     # This is probably a Poliigon texture of either Color or Displacement
