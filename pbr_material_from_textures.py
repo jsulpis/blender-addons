@@ -207,23 +207,31 @@ class PbrNodeTree:
         if "Glossiness" in PbrNodeTree.nodes.keys():
             return
         PbrNodeTree.add_image_texture(image, "Roughness", (-400, -260))
-        PbrNodeTree.add_link("Roughness", 0, "Principled BSDF", 7)
+        colorramp = PbrNodeTree.nodes.new("ShaderNodeValToRGB")
+        colorramp.location = (-200, -330)
+        colorramp.width = 150
+        PbrNodeTree.add_link("Roughness", 0, "ColorRamp", 0)
+        PbrNodeTree.add_link("ColorRamp", 0, "Principled BSDF", 7)
         
     def add_glossiness(image):
         """add a glossiness map"""
         if "Roughness" in PbrNodeTree.nodes.keys():
             return
-        PbrNodeTree.add_image_texture(image, "Glossiness", (-400, -260))
+        PbrNodeTree.add_image_texture(image, "Glossiness", (-600, -300))
         invert = PbrNodeTree.nodes.new("ShaderNodeInvert")
-        invert.location = (-200, -340)
+        invert.location = (-400, -300)
+        colorramp = PbrNodeTree.nodes.new("ShaderNodeValToRGB")
+        colorramp.location = (-200, -330)
+        colorramp.width = 150
         PbrNodeTree.add_link("Glossiness", 0, "Invert", 1)
-        PbrNodeTree.add_link("Invert", 0, "Principled BSDF", 7)
+        PbrNodeTree.add_link("Invert", 0, "ColorRamp", 0)
+        PbrNodeTree.add_link("ColorRamp", 0, "Principled BSDF", 7)
         
     def add_normal(image):
         """add a normal map texture and a normal map node"""
         PbrNodeTree.add_image_texture(image, "Normal", (-400, -520))
         normalMap = PbrNodeTree.nodes.new("ShaderNodeNormalMap")
-        normalMap.location = (-200, -500)
+        normalMap.location = (-200, -550)
         PbrNodeTree.add_link("Normal", 0, "Normal Map", 1)
         PbrNodeTree.add_link("Normal Map", 0, "Principled BSDF", 17)
         
@@ -232,7 +240,7 @@ class PbrNodeTree:
         PbrNodeTree.add_image_texture(image, "Bump", (-400, -520))
         bumpMap = PbrNodeTree.nodes.new("ShaderNodeBump")
         bumpMap.name = "Bump Map"
-        bumpMap.location = (-200, -500)
+        bumpMap.location = (-200, -520)
         PbrNodeTree.add_link("Bump", 0, "Bump Map", 2)
         PbrNodeTree.add_link("Bump Map", 0, "Principled BSDF", 17)
         
@@ -355,28 +363,6 @@ class MaterialPanel(bpy.types.Panel):
         col.label("Projection:")
         col.prop(mft_props, 'projection', text="")
         
-        # Relief strength
-        box = layout.box()
-        box.label("Relief strength")
-        split = box.split()
-
-        if "Nor" in PbrNodeTree.IMAGES.keys():
-            col = split.column()
-            col.label("Normal:")
-            col.prop(mft_props, 'use_normal', text="Enabled")
-            if mft_props.use_normal:
-                col.prop(ntree.nodes["Normal Map"].inputs[0], 'default_value', text="")
-
-        if "Dis" in PbrNodeTree.IMAGES.keys():
-            col = split.column()
-            col.label("Displacement:")
-            col.prop(mft_props, 'use_disp', text="Enabled")
-            if mft_props.use_disp:        
-                col.prop(ntree.nodes["Disp strength"].inputs[1], 'default_value', text="")
-        
-        row = box.row()
-        row.operator("reset_nodes.relief", text="Reset Relief Settings")
-
         # Color
         box = layout.box()
         box.label("Color")
@@ -405,6 +391,44 @@ class MaterialPanel(bpy.types.Panel):
         
         row = box.row()
         row.operator("reset_nodes.color", text="Reset Color Settings")
+        
+        # Roughness
+        box = layout.box()
+        box.label("Roughness")
+        split = box.split()
+        col = split.column()
+        col.label("Black level:")
+        col = split.column()
+        col.label("White level:")
+        
+        row = box.row(align=True)
+        row.prop(ntree.nodes["ColorRamp"].color_ramp.elements[0], 'position', text="")
+        row.prop(ntree.nodes["ColorRamp"].color_ramp.elements[1], 'position', text="")
+        
+        row = box.row()
+        row.operator("reset_nodes.roughness", text="Reset Roughness Levels")
+        
+        # Relief strength
+        box = layout.box()
+        box.label("Relief strength")
+        split = box.split()
+
+        if "Nor" in PbrNodeTree.IMAGES.keys():
+            col = split.column()
+            col.label("Normal:")
+            col.prop(mft_props, 'use_normal', text="Enabled")
+            if mft_props.use_normal:
+                col.prop(ntree.nodes["Normal Map"].inputs[0], 'default_value', text="")
+
+        if "Dis" in PbrNodeTree.IMAGES.keys():
+            col = split.column()
+            col.label("Displacement:")
+            col.prop(mft_props, 'use_disp', text="Enabled")
+            if mft_props.use_disp:        
+                col.prop(ntree.nodes["Disp strength"].inputs[1], 'default_value', text="")
+        
+        row = box.row()
+        row.operator("reset_nodes.relief", text="Reset Relief Strength")
 
     @classmethod
     def poll(cls, context):
@@ -517,25 +541,6 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
             bpy.context.scene.mft_props.color_map = 'DIF'
         elif alb and not dif:
             bpy.context.scene.mft_props.color_map = 'ALB'
-
-
-class ResetReliefSettings(Operator):
-    """Reset the Normal and Displacement strengthes to their default values"""
-    bl_idname = "reset_nodes.relief"
-    bl_label = "Reset the relief settings"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def execute(self, context):
-        ntree = bpy.context.active_object.active_material.node_tree
-        if "Normal Map" in ntree.nodes.keys():
-            normal_map = ntree.nodes["Normal Map"]
-            normal_map.inputs[0].default_value = 1
-        
-        if "Disp strength" in ntree.nodes.keys():
-            disp_mix = ntree.nodes["Disp strength"]
-            disp_mix.inputs[1].default_value = 1
-            
-        return {'FINISHED'}
     
     
 class ResetColorSettings(Operator):
@@ -557,6 +562,41 @@ class ResetColorSettings(Operator):
             print("hello")
             ao_mix = ntree.nodes["Mix Col - Amb"]
             ao_mix.inputs[0].default_value = 1
+            
+        return {'FINISHED'}
+
+
+class ResetReliefSettings(Operator):
+    """Reset the Normal and Displacement strengthes to their default values"""
+    bl_idname = "reset_nodes.relief"
+    bl_label = "Reset the relief settings"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        ntree = bpy.context.active_object.active_material.node_tree
+        if "Normal Map" in ntree.nodes.keys():
+            normal_map = ntree.nodes["Normal Map"]
+            normal_map.inputs[0].default_value = 1
+        
+        if "Disp strength" in ntree.nodes.keys():
+            disp_mix = ntree.nodes["Disp strength"]
+            disp_mix.inputs[1].default_value = 1
+            
+        return {'FINISHED'}
+
+
+class ResetRoughnessSettings(Operator):
+    """Reset the ColorRamp of the roughness map to its default values"""
+    bl_idname = "reset_nodes.roughness"
+    bl_label = "Reset the roughness levels"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        ntree = bpy.context.active_object.active_material.node_tree
+        if "ColorRamp" in ntree.nodes.keys():
+            colorramp = ntree.nodes["ColorRamp"]
+            colorramp.color_ramp.elements[0].position = 0
+            colorramp.color_ramp.elements[1].position = 1
             
         return {'FINISHED'}
 
