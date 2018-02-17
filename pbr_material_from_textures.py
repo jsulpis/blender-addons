@@ -373,6 +373,9 @@ class MaterialPanel(bpy.types.Panel):
             col.prop(mft_props, 'use_disp', text="Enabled")
             if mft_props.use_disp:        
                 col.prop(ntree.nodes["Disp strength"].inputs[1], 'default_value', text="")
+        
+        row = box.row()
+        row.operator("reset_nodes.relief", text="Reset Relief Settings")
 
         # Color
         box = layout.box()
@@ -400,6 +403,8 @@ class MaterialPanel(bpy.types.Panel):
             col.label("AO Mix:")
             col.prop(ntree.nodes["Mix Col - Amb"].inputs[0], 'default_value', text="")
         
+        row = box.row()
+        row.operator("reset_nodes.color", text="Reset Color Settings")
 
     @classmethod
     def poll(cls, context):
@@ -407,7 +412,7 @@ class MaterialPanel(bpy.types.Panel):
 
 
 #--------------------------------------------------------------------------------------------------------
-# Operator
+# Operators
 #--------------------------------------------------------------------------------------------------------
 class ImportTexturesAsMaterial(Operator, ImportHelper):
     """Load textures into a generated node tree to automate PBR material creation"""
@@ -513,6 +518,47 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         elif alb and not dif:
             bpy.context.scene.mft_props.color_map = 'ALB'
 
+
+class ResetReliefSettings(Operator):
+    """Reset the Normal and Displacement strengthes to their default values"""
+    bl_idname = "reset_nodes.relief"
+    bl_label = "Reset the relief settings"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        ntree = bpy.context.active_object.active_material.node_tree
+        if "Normal Map" in ntree.nodes.keys():
+            normal_map = ntree.nodes["Normal Map"]
+            normal_map.inputs[0].default_value = 1
+        
+        if "Disp strength" in ntree.nodes.keys():
+            disp_mix = ntree.nodes["Disp strength"]
+            disp_mix.inputs[1].default_value = 1
+            
+        return {'FINISHED'}
+    
+    
+class ResetColorSettings(Operator):
+    """Reset the Hue Saturation Value and AO-mix nodes to their default values"""
+    bl_idname = "reset_nodes.color"
+    bl_label = "Reset the color settings"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        ntree = bpy.context.active_object.active_material.node_tree
+        if "Hue Saturation Value" in ntree.nodes.keys():
+            print("coucou")
+            hsv_node = ntree.nodes["Hue Saturation Value"]
+            hsv_node.inputs[0].default_value = 0.5
+            hsv_node.inputs[1].default_value = 1
+            hsv_node.inputs[2].default_value = 1
+        
+        if "Mix Col - Amb" in ntree.nodes.keys():
+            print("hello")
+            ao_mix = ntree.nodes["Mix Col - Amb"]
+            ao_mix.inputs[0].default_value = 1
+            
+        return {'FINISHED'}
 
 #--------------------------------------------------------------------------------------------------------
 # Addon Preferences
