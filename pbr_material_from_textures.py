@@ -53,7 +53,31 @@ def set_color_map(self, context):
         image = PbrNodeTree.IMAGES["Alb"]
         PbrNodeTree.nodes["Color"].image = image
         
-
+def toggle_normal(self, context):
+    """Enable or disable the normal map"""
+    ntree = bpy.context.active_object.active_material.node_tree
+    if bpy.context.scene.mft_props.use_normal == False:
+        normal_map = ntree.nodes["Normal Map"]
+        normal_tex = ntree.nodes["Normal"]
+        ntree.nodes.remove(normal_map)
+        ntree.nodes.remove(normal_tex)
+    else:
+        PbrNodeTree.add_normal(image=PbrNodeTree.IMAGES["Nor"])
+        
+def toggle_disp(self, context):
+    """Enable or disable the displacement map"""
+    ntree = bpy.context.active_object.active_material.node_tree
+    if bpy.context.scene.mft_props.use_disp == False:
+        displacement_tex = ntree.nodes["Displacement"]
+        math_node = ntree.nodes["Disp strength"]
+        materialOutput = ntree.nodes["Material Output"]
+        
+        ntree.nodes.remove(displacement_tex)
+        ntree.nodes.remove(math_node)
+        materialOutput.location = (300, 0)
+    else:
+        PbrNodeTree.add_height(image=PbrNodeTree.IMAGES["Dis"])
+    
 
 class PBRMaterialProperties(bpy.types.PropertyGroup):
     """The set of properties to tweak the material"""
@@ -100,6 +124,17 @@ class PBRMaterialProperties(bpy.types.PropertyGroup):
         default='ALB',
     )
     
+    use_normal = BoolProperty(
+        name="Use normal map",
+        default=True,
+        update=toggle_normal
+    )
+    
+    use_disp = BoolProperty(
+        name="Use displacement map",
+        default=True,
+        update=toggle_disp
+    )
 
 #--------------------------------------------------------------------------------------------------------
 # PBR Node Tree
@@ -325,13 +360,19 @@ class MaterialPanel(bpy.types.Panel):
         box.label("Relief strength")
         split = box.split()
 
-        col = split.column()
-        col.label("Normal:")
-        col.prop(ntree.nodes["Normal Map"].inputs[0], 'default_value', text="")
+        if "Nor" in PbrNodeTree.IMAGES.keys():
+            col = split.column()
+            col.label("Normal:")
+            col.prop(mft_props, 'use_normal', text="Enabled")
+            if mft_props.use_normal:
+                col.prop(ntree.nodes["Normal Map"].inputs[0], 'default_value', text="")
 
-        col = split.column()
-        col.label("Displacement:")
-        col.prop(ntree.nodes["Disp strength"].inputs[1], 'default_value', text="")
+        if "Dis" in PbrNodeTree.IMAGES.keys():
+            col = split.column()
+            col.label("Displacement:")
+            col.prop(mft_props, 'use_disp', text="Enabled")
+            if mft_props.use_disp:        
+                col.prop(ntree.nodes["Disp strength"].inputs[1], 'default_value', text="")
 
         # Color
         box = layout.box()
