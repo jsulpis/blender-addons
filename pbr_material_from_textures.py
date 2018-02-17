@@ -171,6 +171,7 @@ class PbrNodeTree:
         imageTexture.name = name
         imageTexture.label = name
         imageTexture.color_space = color_space
+        imageTexture.projection = bpy.context.scene.mft_props.projection
         
         PbrNodeTree.add_link("Mapping", 0, name, 0)
         
