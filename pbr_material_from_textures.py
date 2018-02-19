@@ -78,6 +78,16 @@ def toggle_disp(self, context):
     else:
         PbrNodeTree.add_height(image=PbrNodeTree.IMAGES["Dis"])
     
+def toggle_microdisp(self, context):
+    """Enable or disable the microdisplacement feature"""
+    mode = bpy.context.scene.cycles.feature_set
+    bpy.context.scene.cycles.feature_set = 'EXPERIMENTAL' if mode == 'SUPPORTED' else 'SUPPORTED'
+    object = bpy.context.active_object
+    object.active_material.cycles.displacement_method = 'TRUE'
+    if "Subsurf" not in object.modifiers.keys():
+        bpy.ops.object.modifier_add(type='SUBSURF')
+    bpy.context.scene.mft_props.use_normal = False
+    object.cycles.use_adaptive_subdivision = True
 
 class PBRMaterialProperties(bpy.types.PropertyGroup):
     """The set of properties to tweak the material"""
@@ -134,6 +144,12 @@ class PBRMaterialProperties(bpy.types.PropertyGroup):
         name="Use displacement map",
         default=True,
         update=toggle_disp
+    )
+    
+    use_microdisp = BoolProperty(
+        name="Use microdisplacement feature",
+        default=False,
+        update=toggle_microdisp
     )
 
 #--------------------------------------------------------------------------------------------------------
@@ -430,6 +446,31 @@ class MaterialPanel(bpy.types.Panel):
         
         row = box.row()
         row.operator("reset_nodes.relief", text="Reset Relief Strength")
+        
+        # Microdisplacement
+        box = layout.box()
+        box.label("Microdisplacement")
+        row = box.row()
+        row.prop(mft_props, 'use_microdisp')
+        
+        if bpy.context.scene.mft_props.use_microdisp == True:
+            object = bpy.context.active_object
+            
+            row = box.row()
+            row.prop(object.modifiers["Subsurf"], 'subdivision_type', expand=True)
+            
+            cycles = bpy.context.scene.cycles
+            split = box.split()
+            
+            col = split.column()
+            col.label("View:")
+            col.prop(object.modifiers["Subsurf"], "levels")
+            
+            col = split.column(align=True)
+            col.row().label("Subdivision Rate:")
+            col.row().prop(cycles, 'dicing_rate', text="Render")
+            col.row().prop(cycles, 'preview_dicing_rate', text="Preview")
+        
 
     @classmethod
     def poll(cls, context):
