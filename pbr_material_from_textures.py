@@ -23,27 +23,30 @@ from bpy.types import Operator, AddonPreferences
 def set_mapping(self, context):
     """set the texture coordinate mapping"""
     value = int(self.mapping)
-    tex_coord = context.active_object.active_material.node_tree.nodes["Texture Coordinate"]
-    mapping = context.active_object.active_material.node_tree.nodes["Mapping"]
-    context.active_object.active_material.node_tree.links.new(tex_coord.outputs[value], mapping.inputs[0])
+    
+    ntree = context.active_object.active_material.node_tree
+    # we first test if there are texture coordinate and mapping nodes in the base tree
+    # to work with all materials
+    if "Texture Coordinate" in ntree.nodes.keys() and "Mapping" in ntree.nodes.keys():
+            tex_coord = ntree.nodes["Texture Coordinate"]
+            mapping = ntree.nodes["Mapping"]
+            ntree.links.new(tex_coord.outputs[value], mapping.inputs[0])
+            
+    # we then go in the PBR node group
+    if "Group" in ntree.nodes.keys():
+        ntree = context.active_object.active_material.node_tree.nodes["Group"].node_tree
+        if "Texture Coordinate" in ntree.nodes.keys() and "Mapping" in ntree.nodes.keys():
+            tex_coord = ntree.nodes["Texture Coordinate"]
+            mapping = ntree.nodes["Mapping"]
+            ntree.links.new(tex_coord.outputs[value], mapping.inputs[0])
     
 def set_projection(self, context):
     """set the projection of a 2D image on a 3D object"""
     value = self.projection
-    for node in bpy.context.active_object.active_material.node_tree.nodes:
+    for node in context.active_object.active_material.node_tree.nodes["Group"].node_tree.nodes:
         if node.type == 'TEX_IMAGE':
             node.projection = value
-
-def toggle_microdisp(self, context):
-    """Enable or disable the microdisplacement feature"""
-    mode = bpy.context.scene.cycles.feature_set
-    bpy.context.scene.cycles.feature_set = 'EXPERIMENTAL' if mode == 'SUPPORTED' else 'SUPPORTED'
-    object = bpy.context.active_object
-    object.active_material.cycles.displacement_method = 'TRUE'
-    if "Subsurf" not in object.modifiers.keys():
-        bpy.ops.object.modifier_add(type='SUBSURF')
-    bpy.context.scene.mft_props.use_normal = False
-    object.cycles.use_adaptive_subdivision = True
+            
 
 class PBRMaterialProperties(bpy.types.PropertyGroup):
     """The set of properties to tweak the material"""
@@ -72,11 +75,6 @@ class PBRMaterialProperties(bpy.types.PropertyGroup):
         default='FLAT',
     )
     
-    use_microdisp = BoolProperty(
-        name="Use microdisplacement feature",
-        default=False,
-        update=toggle_microdisp
-    )
 
 #--------------------------------------------------------------------------------------------------------
 # PBR Node Tree
@@ -184,12 +182,13 @@ class PbrNodeTree:
         offset_node.name = "Roughness Offset"
         offset_node.label = "Roughness Offset"
         offset_node.operation = 'ADD'
+        offset_node.inputs[1].default_value = 0
         
         PbrNodeTree.add_link("Roughness", 0, "Roughness Offset", 0)
         PbrNodeTree.add_link("Roughness Offset", 0, "Principled BSDF", 7)
         
     def add_glossiness(image):
-        """add a glossiness map"""
+        """add a glossiness map and a math node for the offset"""
         if "Roughness" in PbrNodeTree.nodes.keys():
             return
         PbrNodeTree.add_image_texture(image, "Glossiness", (-1200, -300))
@@ -198,6 +197,7 @@ class PbrNodeTree:
         offset_node.name = "Glossiness Offset"
         offset_node.label = "Glossiness Offset"
         offset_node.operation = 'ADD'
+        offset_node.inputs[1].default_value = 0
         
         invert = PbrNodeTree.nodes.new("ShaderNodeInvert")
         invert.location = (-700, -300)
@@ -241,6 +241,7 @@ class PbrNodeTree:
         mix_shader.name = name
         mix_shader.label = name
         mix_shader.operation = 'ADD'
+        mix_shader.inputs[1].default_value = 0
         
         mix_shader = PbrNodeTree.nodes.new("ShaderNodeMath")
         mix_shader.location = (-700, -900)
@@ -248,6 +249,7 @@ class PbrNodeTree:
         mix_shader.name = name
         mix_shader.label = name
         mix_shader.operation = 'MULTIPLY'
+        mix_shader.inputs[1].default_value = 1
 
         PbrNodeTree.ntree.outputs.new("NodeSocketFloat", "Displacement")
         PbrNodeTree.add_link("Displacement", 0, "Disp Offset", 0)
@@ -290,6 +292,7 @@ class PbrNodeTree:
         scale_group.location = (-1500, 0)
         scale_tree.inputs.new("NodeSocketVector", "Vector")
         scale_tree.inputs.new("NodeSocketFloat", "Scale")
+        scale_group.inputs[1].default_value = 1
         scale_tree.outputs.new("NodeSocketVector", "Vector")
         
         input_node = scale_nodes.new("NodeGroupInput")
@@ -313,36 +316,40 @@ class PbrNodeTree:
         node2 = PbrNodeTree.nodes[nodeName2]
         PbrNodeTree.ntree.links.new(node1.outputs[outputId], node2.inputs[inputId])
         
-    def add_single_controller(type, name, node_name, node_input, default_value, min_value, max_value):
+    def set_single_controller(type, name, node_name, node_input, default_value, min_value, max_value, update):
         """add a controller in the node group"""
         if node_name not in PbrNodeTree.nodes.keys():
             "there is no such node in the tree (the corresponding map has not been loaded)"
             return
-        PbrNodeTree.ntree.inputs.new(type, name)
-        PbrNodeTree.add_link("Group Input", PbrNodeTree.input_counter, node_name, node_input)
-        PbrNodeTree.pbr_group.inputs[name].default_value = default_value
-        PbrNodeTree.ntree.inputs[name].default_value = default_value
-        PbrNodeTree.ntree.inputs[name].min_value = min_value
-        PbrNodeTree.ntree.inputs[name].max_value = max_value
-        PbrNodeTree.input_counter += 1
         
-    def add_controllers():
+        if not update:
+            # create the inputs
+            PbrNodeTree.ntree.inputs.new(type, name)
+            PbrNodeTree.add_link("Group Input", PbrNodeTree.input_counter, node_name, node_input)
+            PbrNodeTree.ntree.inputs[name].default_value = default_value
+            PbrNodeTree.ntree.inputs[name].min_value = min_value
+            PbrNodeTree.ntree.inputs[name].max_value = max_value
+            PbrNodeTree.input_counter += 1
+            
+        PbrNodeTree.pbr_group.inputs[name].default_value = default_value
+                
+    def set_controllers(update=False):
         """add all the inputs in the node group to control the material settings"""
         PbrNodeTree.input_counter = 0
         
-        PbrNodeTree.add_single_controller("NodeSocketFloat", "Scale", "Scale", 1, 1, 0.2, 5)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "Saturation", "Hue Saturation Value", 1, 1, 0, 1.5)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "Brightness", "Hue Saturation Value", 2, 1, 0, 2)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "Contrast", "Bright/Contrast", 2, 0, -0.1, 0.1)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "AO Intensity", "AO Intensity", 0, 1, 0, 1)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "Reflection Offset", "Reflection Offset", 1, 0, -0.5, 0.5)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "Roughness Offset", "Roughness Offset", 1, 0, -0.5, 0.5)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "Glossiness Offset", "Glossiness Offset", 1, 0, -0.5, 0.5)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "Normal Intensity", "Normal Map", 0, 1, 0, 2)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "Bump Intensity", "Bump Map", 0, 1, 0, 1)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "Bump Distance", "Bump Map", 1, 0.1, 0, 1)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "Displacement Offset", "Disp Offset", 1, 0, -0.5, 0.5)
-        PbrNodeTree.add_single_controller("NodeSocketFloatFactor", "Displacement Intensity", "Disp Intensity", 1, 1, 0.1, 2)
+        PbrNodeTree.set_single_controller("NodeSocketFloat", "Scale", "Scale", 1, 1, 0.2, 5, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Saturation", "Hue Saturation Value", 1, 1, 0, 1.5, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Brightness", "Hue Saturation Value", 2, 1, 0, 2, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Contrast", "Bright/Contrast", 2, 0, -0.1, 0.1, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "AO Intensity", "AO Intensity", 0, 1, 0, 1, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Reflection Offset", "Reflection Offset", 1, 0, -0.5, 0.5, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Roughness Offset", "Roughness Offset", 1, 0, -0.5, 0.5, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Glossiness Offset", "Glossiness Offset", 1, 0, -0.5, 0.5, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Normal Intensity", "Normal Map", 0, 1, 0, 2, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Bump Intensity", "Bump Map", 0, 1, 0, 1, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Bump Distance", "Bump Map", 1, 0.1, 0, 1, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Displacement Offset", "Disp Offset", 1, 0, -0.5, 0.5, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Displacement Intensity", "Disp Intensity", 1, 1, 0.1, 2, update)
         
     @staticmethod
     def fill_tree():
@@ -379,12 +386,20 @@ class MaterialPanel(bpy.types.Panel):
 
         row = layout.row()
         row.scale_y = 2
-        row.operator("import_image.to_material", text="Load textures", icon="FILESEL")
+        row.operator("mft.import_textures", text="Load textures", icon="FILESEL")
         
-        row = layout.row()
-        row.operator("material.new_pbr_material", text="Create an empty node tree", icon="NODETREE")
+        box = layout.box()
+        box.label("Create empty node tree", icon="NODETREE")
+        split = box.split()
+        col = split.column()
+        col.scale_y = 2
+        col.operator("mft.new_pbr_mr_material", text="Metalness / Roughness")
+        col = split.column()
+        col.scale_y = 2
+        col.operator("mft.new_pbr_sg_material", text="Specular / Glossiness")
     
-        return
+        if context.active_object.active_material.node_tree is None:
+            return
         mft_props = context.scene.mft_props
         ntree = context.active_object.active_material.node_tree
         
@@ -399,105 +414,14 @@ class MaterialPanel(bpy.types.Panel):
         col.prop(mft_props, 'mapping', text="")
         
         col = split.column()
-        col.label("Scale:")
-        col.prop(mft_props, 'texture_scale', text="")
-        
-        col = split.column()
         col.label("Projection:")
         col.prop(mft_props, 'projection', text="")
         
-        # Color
-        box = layout.box()
-        box.label("Color")
+        # Reset
+        row = layout.row()
+        row.scale_y = 2
+        row.operator("mft.reset_group", text="Reset Material", icon="FILE_REFRESH")
         
-        dif, alb = False, False
-        for extension in PbrNodeTree.IMAGES.keys():
-            if extension == "Dif":
-                dif = True
-            elif extension == "Alb":
-                alb = True
-        if dif and alb:
-            row = box.row()
-            row.prop(mft_props, 'color_map', expand=True)
-        
-        split = box.split()
-        
-        col = split.column(align=True)
-        col.prop(ntree.nodes["Hue Saturation Value"].inputs[0], 'default_value', text="Hue")
-        col.prop(ntree.nodes["Hue Saturation Value"].inputs[1], 'default_value', text="Saturation")
-        col.prop(ntree.nodes["Hue Saturation Value"].inputs[2], 'default_value', text="Value")
-        
-        if "Ambient Occlusion" in ntree.nodes.keys():
-            col = split.column()
-            col.label("AO Mix:")
-            col.prop(ntree.nodes["Mix Col - Amb"].inputs[0], 'default_value', text="")
-        
-        row = box.row()
-        row.operator("reset_nodes.color", text="Reset Color Settings")
-        
-        # Roughness
-        box = layout.box()
-        box.label("Roughness")
-        split = box.split()
-        col = split.column()
-        col.label("Black level:")
-        col = split.column()
-        col.label("White level:")
-        
-        row = box.row(align=True)
-        row.prop(ntree.nodes["ColorRamp"].color_ramp.elements[0], 'position', text="")
-        row.prop(ntree.nodes["ColorRamp"].color_ramp.elements[1], 'position', text="")
-        
-        row = box.row()
-        row.operator("reset_nodes.roughness", text="Reset Roughness Levels")
-        
-        # Relief strength
-        box = layout.box()
-        box.label("Relief strength")
-        split = box.split()
-
-        if "Nor" in PbrNodeTree.IMAGES.keys():
-            col = split.column()
-            col.label("Normal:")
-            col.prop(mft_props, 'use_normal', text="Enabled")
-            if mft_props.use_normal:
-                col.prop(ntree.nodes["Normal Map"].inputs[0], 'default_value', text="")
-
-        if "Dis" in PbrNodeTree.IMAGES.keys():
-            col = split.column()
-            col.label("Displacement:")
-            col.prop(mft_props, 'use_disp', text="Enabled")
-            if mft_props.use_disp:        
-                col.prop(ntree.nodes["Disp strength"].inputs[1], 'default_value', text="")
-        
-        row = box.row()
-        row.operator("reset_nodes.relief", text="Reset Relief Strength")
-        
-        # Microdisplacement
-        box = layout.box()
-        box.label("Microdisplacement")
-        row = box.row()
-        row.prop(mft_props, 'use_microdisp')
-        
-        if bpy.context.scene.mft_props.use_microdisp == True:
-            object = bpy.context.active_object
-            
-            row = box.row()
-            row.prop(object.modifiers["Subsurf"], 'subdivision_type', expand=True)
-            
-            cycles = bpy.context.scene.cycles
-            split = box.split()
-            
-            col = split.column()
-            col.label("View:")
-            col.prop(object.modifiers["Subsurf"], "levels")
-            
-            col = split.column(align=True)
-            col.row().label("Subdivision Rate:")
-            col.row().prop(cycles, 'dicing_rate', text="Render")
-            col.row().prop(cycles, 'preview_dicing_rate', text="Preview")
-        
-
     @classmethod
     def poll(cls, context):
         return context.scene.render.engine == 'CYCLES'
@@ -508,7 +432,7 @@ class MaterialPanel(bpy.types.Panel):
 #--------------------------------------------------------------------------------------------------------
 class ImportTexturesAsMaterial(Operator, ImportHelper):
     """Load textures into a generated node tree to automate PBR material creation"""
-    bl_idname = "import_image.to_material"
+    bl_idname = "mft.import_textures"
     bl_label = "Import Textures As Material"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -534,7 +458,7 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         PbrNodeTree.init(material_name)
         PbrNodeTree.IMAGES = images
         PbrNodeTree.fill_tree()
-        PbrNodeTree.add_controllers()
+        PbrNodeTree.set_controllers()
         
         return {'FINISHED'}
     
@@ -610,10 +534,10 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
             bpy.context.scene.mft_props.color_map = 'ALB'
     
     
-class CreateEmptyMaterial(Operator):
-    """Create a PBR node tree without images"""
-    bl_idname = "material.new_pbr_material"
-    bl_label = "Create a PBR material with empty images"
+class CreateEmptyMrMaterial(Operator):
+    """Create a PBR node tree with Metallic/Roughness maps without images"""
+    bl_idname = "mft.new_pbr_mr_material"
+    bl_label = "Create a PBR material with Metallic/Roughness maps without images"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -630,70 +554,57 @@ class CreateEmptyMaterial(Operator):
         PbrNodeTree.add_height(None)
         PbrNodeTree.add_normal(None)
         PbrNodeTree.add_roughness(None)
-        PbrNodeTree.add_glossiness(None)
         PbrNodeTree.add_metallic(None)
         
-        PbrNodeTree.add_controllers()
+        PbrNodeTree.set_controllers()
     
         return {'FINISHED'}
     
 
-class ResetColorSettings(Operator):
-    """Reset the Hue Saturation Value and AO-mix nodes to their default values"""
-    bl_idname = "reset_nodes.color"
-    bl_label = "Reset the color settings"
+class CreateEmptySgMaterial(Operator):
+    """Create a PBR node tree with Specular/Glossiness maps without images"""
+    bl_idname = "mft.new_pbr_sg_material"
+    bl_label = "Create a PBR material with Specular/Glossiness maps without images"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        ntree = bpy.context.active_object.active_material.node_tree
-        if "Hue Saturation Value" in ntree.nodes.keys():
-            print("coucou")
-            hsv_node = ntree.nodes["Hue Saturation Value"]
-            hsv_node.inputs[0].default_value = 0.5
-            hsv_node.inputs[1].default_value = 1
-            hsv_node.inputs[2].default_value = 1
+        # Create a new material
+        new_material = bpy.data.materials.new(name="PBR Material")
+        new_material.use_nodes = True
+        bpy.context.active_object.active_material = new_material
         
-        if "Mix Col - Amb" in ntree.nodes.keys():
-            print("hello")
-            ao_mix = ntree.nodes["Mix Col - Amb"]
-            ao_mix.inputs[0].default_value = 1
-            
-        return {'FINISHED'}
-
-
-class ResetReliefSettings(Operator):
-    """Reset the Normal and Displacement strengthes to their default values"""
-    bl_idname = "reset_nodes.relief"
-    bl_label = "Reset the relief settings"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def execute(self, context):
-        ntree = bpy.context.active_object.active_material.node_tree
-        if "Normal Map" in ntree.nodes.keys():
-            normal_map = ntree.nodes["Normal Map"]
-            normal_map.inputs[0].default_value = 1
+        # Fill the node tree
+        PbrNodeTree.init("PBR Material")
         
-        if "Disp strength" in ntree.nodes.keys():
-            disp_mix = ntree.nodes["Disp strength"]
-            disp_mix.inputs[1].default_value = 1
-            
+        PbrNodeTree.add_ao(None)
+        PbrNodeTree.add_color(None)
+        PbrNodeTree.add_height(None)
+        PbrNodeTree.add_normal(None)
+        PbrNodeTree.add_specular(None)
+        PbrNodeTree.add_glossiness(None)
+        
+        PbrNodeTree.set_controllers()
+        
         return {'FINISHED'}
-
-
-class ResetRoughnessSettings(Operator):
-    """Reset the ColorRamp of the roughness map to its default values"""
-    bl_idname = "reset_nodes.roughness"
-    bl_label = "Reset the roughness levels"
+    
+    
+class ResetNodeGroup(Operator):
+    """Reset the Node Group"""
+    bl_idname = "mft.reset_group"
+    bl_label = "Reset the Node Group"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        ntree = bpy.context.active_object.active_material.node_tree
-        if "ColorRamp" in ntree.nodes.keys():
-            colorramp = ntree.nodes["ColorRamp"]
-            colorramp.color_ramp.elements[0].position = 0
-            colorramp.color_ramp.elements[1].position = 1
-            
+        try:
+            group = context.active_object.active_material.node_tree.nodes["Group"]
+        except KeyError:
+            # No group in the node tree
+            return {'FINISHED'}
+        
+        PbrNodeTree.set_controllers(update=True)
+    
         return {'FINISHED'}
+
 
 #--------------------------------------------------------------------------------------------------------
 # Addon Preferences
