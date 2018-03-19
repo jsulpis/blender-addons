@@ -16,6 +16,8 @@ from bpy_extras.io_utils import ImportHelper
 from bpy.props import CollectionProperty, StringProperty, IntProperty, BoolProperty, EnumProperty, PointerProperty, FloatProperty
 from bpy.types import Operator, AddonPreferences
 
+from collections import OrderedDict
+
 
 #--------------------------------------------------------------------------------------------------------
 # Settings
@@ -23,27 +25,30 @@ from bpy.types import Operator, AddonPreferences
 def set_mapping(self, context):
     """set the texture coordinate mapping"""
     value = int(self.mapping)
-    tex_coord = context.active_object.active_material.node_tree.nodes["Texture Coordinate"]
-    mapping = context.active_object.active_material.node_tree.nodes["Mapping"]
-    context.active_object.active_material.node_tree.links.new(tex_coord.outputs[value], mapping.inputs[0])
+    
+    ntree = context.active_object.active_material.node_tree
+    # we first test if there are texture coordinate and mapping nodes in the base tree
+    # to work with all materials
+    if "Texture Coordinate" in ntree.nodes.keys() and "Mapping" in ntree.nodes.keys():
+            tex_coord = ntree.nodes["Texture Coordinate"]
+            mapping = ntree.nodes["Mapping"]
+            ntree.links.new(tex_coord.outputs[value], mapping.inputs[0])
+            
+    # we then go in the PBR node group
+    if "Group" in ntree.nodes.keys():
+        ntree = context.active_object.active_material.node_tree.nodes["Group"].node_tree
+        if "Texture Coordinate" in ntree.nodes.keys() and "Mapping" in ntree.nodes.keys():
+            tex_coord = ntree.nodes["Texture Coordinate"]
+            mapping = ntree.nodes["Mapping"]
+            ntree.links.new(tex_coord.outputs[value], mapping.inputs[0])
     
 def set_projection(self, context):
     """set the projection of a 2D image on a 3D object"""
     value = self.projection
-    for node in bpy.context.active_object.active_material.node_tree.nodes:
+    for node in context.active_object.active_material.node_tree.nodes["Group"].node_tree.nodes:
         if node.type == 'TEX_IMAGE':
             node.projection = value
-
-def toggle_microdisp(self, context):
-    """Enable or disable the microdisplacement feature"""
-    mode = bpy.context.scene.cycles.feature_set
-    bpy.context.scene.cycles.feature_set = 'EXPERIMENTAL' if mode == 'SUPPORTED' else 'SUPPORTED'
-    object = bpy.context.active_object
-    object.active_material.cycles.displacement_method = 'TRUE'
-    if "Subsurf" not in object.modifiers.keys():
-        bpy.ops.object.modifier_add(type='SUBSURF')
-    bpy.context.scene.mft_props.use_normal = False
-    object.cycles.use_adaptive_subdivision = True
+            
 
 class PBRMaterialProperties(bpy.types.PropertyGroup):
     """The set of properties to tweak the material"""
@@ -72,11 +77,6 @@ class PBRMaterialProperties(bpy.types.PropertyGroup):
         default='FLAT',
     )
     
-    use_microdisp = BoolProperty(
-        name="Use microdisplacement feature",
-        default=False,
-        update=toggle_microdisp
-    )
 
 #--------------------------------------------------------------------------------------------------------
 # PBR Node Tree
@@ -147,14 +147,32 @@ class PbrNodeTree:
         PbrNodeTree.add_link("Color", 0, "Hue Saturation Value", 4)
                 
         if "Ambient Occlusion" in PbrNodeTree.nodes.keys():
-            PbrNodeTree.mix_col_ao()
+            #add a mix RGB shader between the color and AO maps"""
+            mix_shader = PbrNodeTree.nodes.new("ShaderNodeMixRGB")
+            mix_shader.location = (-500, 450)
+            mix_shader.blend_type = 'MULTIPLY'
+            mix_shader.inputs[0].default_value = 1
+            name = "AO Intensity"
+            mix_shader.name = name
+            mix_shader.label = name
+
+            PbrNodeTree.add_link("Bright/Contrast", 0, name, 1)
+            PbrNodeTree.add_link("AO Power", 0, name, 2)
+            PbrNodeTree.add_link(name, 0, "Principled BSDF", 0)
         
     def add_ao(image):
         """add an ambient occlusion map and mix it with the diffuse if it exists"""
         PbrNodeTree.add_image_texture(image, "Ambient Occlusion", (-1200, 300))
-        if "Color" in PbrNodeTree.nodes.keys():
-            PbrNodeTree.mix_col_ao()
-            
+        
+        power_node = PbrNodeTree.nodes.new("ShaderNodeMath")
+        power_node.location = (-900, 300)
+        power_node.name = "AO Power"
+        power_node.label = "AO Power"
+        power_node.operation = 'POWER'
+        power_node.inputs[1].default_value = 1
+        
+        PbrNodeTree.add_link("Ambient Occlusion", 0, "AO Power", 0)
+        
     def add_metallic(image):
         """add a metallic map"""
         PbrNodeTree.add_image_texture(image, "Metallic", (-1200, 0))
@@ -184,12 +202,13 @@ class PbrNodeTree:
         offset_node.name = "Roughness Offset"
         offset_node.label = "Roughness Offset"
         offset_node.operation = 'ADD'
+        offset_node.inputs[1].default_value = 0
         
         PbrNodeTree.add_link("Roughness", 0, "Roughness Offset", 0)
         PbrNodeTree.add_link("Roughness Offset", 0, "Principled BSDF", 7)
         
     def add_glossiness(image):
-        """add a glossiness map"""
+        """add a glossiness map and a math node for the offset"""
         if "Roughness" in PbrNodeTree.nodes.keys():
             return
         PbrNodeTree.add_image_texture(image, "Glossiness", (-1200, -300))
@@ -198,6 +217,7 @@ class PbrNodeTree:
         offset_node.name = "Glossiness Offset"
         offset_node.label = "Glossiness Offset"
         offset_node.operation = 'ADD'
+        offset_node.inputs[1].default_value = 0
         
         invert = PbrNodeTree.nodes.new("ShaderNodeInvert")
         invert.location = (-700, -300)
@@ -208,69 +228,74 @@ class PbrNodeTree:
         
     def add_normal(image):
         """add a normal map texture and a normal map node"""
-        if "Bump" in PbrNodeTree.nodes.keys():
-            "we currently override the bump map with the normal map"
-            PbrNodeTree.nodes.remove(PbrNodeTree.nodes["Bump"])
-            PbrNodeTree.nodes.remove(PbrNodeTree.nodes["Bump Map"])
-            
         PbrNodeTree.add_image_texture(image, "Normal", (-1200, -600))
-        normalMap = PbrNodeTree.nodes.new("ShaderNodeNormalMap")
-        normalMap.location = (-900, -600)
+        normal_map = PbrNodeTree.nodes.new("ShaderNodeNormalMap")
+        normal_map.location = (-900, -600)
         PbrNodeTree.add_link("Normal", 0, "Normal Map", 1)
-        PbrNodeTree.add_link("Normal Map", 0, "Principled BSDF", 17)
+        
+        if "Bump" in PbrNodeTree.nodes.keys():
+            nodes_to_move = [PbrNodeTree.nodes["Bump"], PbrNodeTree.nodes["Bump Intensity"], PbrNodeTree.nodes["Bump Map"]]
+            
+            PbrNodeTree.add_link("Normal Map", 0, "Bump Map", 3)
+            PbrNodeTree.add_link("Bump Map", 0, "Principled BSDF", 17)
+            
+            if "Displacement" in PbrNodeTree.nodes.keys():
+                nodes_to_move.append(PbrNodeTree.nodes["Displacement"])
+                nodes_to_move.append(PbrNodeTree.nodes["Disp Intensity"])
+            
+            for node in nodes_to_move:
+                node.location.y -= 300
+        
+        elif "Displacement" in PbrNodeTree.nodes.keys():
+            # There is a displacement map but no bump map.
+            # No need to move nodes but we mix the normal map and displacement maps.
+            bump_map = PbrNodeTree.nodes.new("ShaderNodeBump")
+            bump_map.name = "Bump Map"
+            bump_map.location = (-700, -600)
+            
+            PbrNodeTree.add_link("Disp Intensity", 0, "Bump Map", 2)
+            PbrNodeTree.add_link("Normal Map", 0, "Bump Map", 3)
+            PbrNodeTree.add_link("Bump Map", 0, "Principled BSDF", 17)
+        
+        else:
+            # There is no bump nor displacement to mix, we plug the normal map directly into the Principled BSDF
+            PbrNodeTree.add_link("Normal Map", 0, "Principled BSDF", 17)
         
     def add_bump(image):
         """add a bump texture and a bump node"""
-        if "Normal" in PbrNodeTree.nodes.keys():
-            "There is already a normal map. We currently override it"
-            return
         PbrNodeTree.add_image_texture(image, "Bump", (-1200, -600))
-        bumpMap = PbrNodeTree.nodes.new("ShaderNodeBump")
-        bumpMap.name = "Bump Map"
-        bumpMap.location = (-900, -600)
-        PbrNodeTree.add_link("Bump", 0, "Bump Map", 2)
+                
+        mix_shader = PbrNodeTree.nodes.new("ShaderNodeMath")
+        mix_shader.location = (-900, -600)
+        name = "Bump Intensity"
+        mix_shader.name = name
+        mix_shader.label = name
+        mix_shader.operation = 'MULTIPLY'
+        mix_shader.inputs[1].default_value = 0.5
+        
+        bump_map = PbrNodeTree.nodes.new("ShaderNodeBump")
+        bump_map.name = "Bump Map"
+        bump_map.location = (-700, -600)
+        
+        PbrNodeTree.add_link("Bump", 0, "Bump Intensity", 0)
+        PbrNodeTree.add_link("Bump Intensity", 0, "Bump Map", 2)
         PbrNodeTree.add_link("Bump Map", 0, "Principled BSDF", 17)
 
     def add_height(image):
         """add a displacement map and a math node to adjust the strength"""
         PbrNodeTree.add_image_texture(image, "Displacement", (-1200, -900))
-
-        mix_shader = PbrNodeTree.nodes.new("ShaderNodeMath")
-        mix_shader.location = (-900, -900)
-        name = "Disp Offset"
-        mix_shader.name = name
-        mix_shader.label = name
-        mix_shader.operation = 'ADD'
         
         mix_shader = PbrNodeTree.nodes.new("ShaderNodeMath")
-        mix_shader.location = (-700, -900)
+        mix_shader.location = (-900, -900)
         name = "Disp Intensity"
         mix_shader.name = name
         mix_shader.label = name
         mix_shader.operation = 'MULTIPLY'
+        mix_shader.inputs[1].default_value = 1
 
         PbrNodeTree.ntree.outputs.new("NodeSocketFloat", "Displacement")
-        PbrNodeTree.add_link("Displacement", 0, "Disp Offset", 0)
-        PbrNodeTree.add_link("Disp Offset", 0, "Disp Intensity", 0)
+        PbrNodeTree.add_link("Displacement", 0, "Disp Intensity", 0)
         PbrNodeTree.add_link("Disp Intensity", 0, "Group Output", 1)
-        group = PbrNodeTree.base_tree.nodes["Group"]
-        material_output = PbrNodeTree.base_tree.nodes["Material Output"]
-        PbrNodeTree.base_tree.links.new(group.outputs[1], material_output.inputs[2])     
-
-    def mix_col_ao():
-        """add a mix RGB shader between the color and AO maps"""
-        mix_shader = PbrNodeTree.nodes.new("ShaderNodeMixRGB")
-        
-        mix_shader.location = (-500, 450)
-        mix_shader.blend_type = 'MULTIPLY'
-
-        name = "AO Intensity"
-        mix_shader.name = name
-        mix_shader.label = name
-
-        PbrNodeTree.add_link("Bright/Contrast", 0, name, 1)
-        PbrNodeTree.add_link("Ambient Occlusion", 0, name, 2)
-        PbrNodeTree.add_link(name, 0, "Principled BSDF", 0)
         
     def add_tex_coord():
         """add a texture coordinate and mapping nodes"""
@@ -290,6 +315,7 @@ class PbrNodeTree:
         scale_group.location = (-1500, 0)
         scale_tree.inputs.new("NodeSocketVector", "Vector")
         scale_tree.inputs.new("NodeSocketFloat", "Scale")
+        scale_group.inputs[1].default_value = 1
         scale_tree.outputs.new("NodeSocketVector", "Vector")
         
         input_node = scale_nodes.new("NodeGroupInput")
@@ -434,7 +460,7 @@ class MaterialPanel(bpy.types.Panel):
 #--------------------------------------------------------------------------------------------------------
 class ImportTexturesAsMaterial(Operator, ImportHelper):
     """Load textures into a generated node tree to automate PBR material creation"""
-    bl_idname = "import_image.to_material"
+    bl_idname = "mft.import_textures"
     bl_label = "Import Textures As Material"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -460,7 +486,7 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         PbrNodeTree.init(material_name)
         PbrNodeTree.IMAGES = images
         PbrNodeTree.fill_tree()
-        PbrNodeTree.add_controllers()
+        PbrNodeTree.set_controllers()
         
         return {'FINISHED'}
     
@@ -483,8 +509,8 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
         images = {}
         prefs = context.user_preferences.addons['pbr_material_from_textures'].preferences
         suffixes = {
-            'diffuse_suffixes': 'Dif', 
-            'albedo_suffixes': 'Alb', 
+            'diffuse_suffixes': 'Col',
+            'albedo_suffixes': 'Col',
             'ao_suffixes': 'AO', 
             'roughness_suffixes': 'Rou', 
             'glossiness_suffixes': 'Glo', 
@@ -499,27 +525,19 @@ class ImportTexturesAsMaterial(Operator, ImportHelper):
             print("Loading file: " + file.name)
             image = bpy.data.images.load(path, check_existing=True)
             name_list = image.name.split('.')[0].split('_')
-            extension = name_list[-1]
-            
-            # Name variations
-            if 'k' in extension.lower() or "hires" == extension.lower():
-                # the last part of the name is probably the resolution (like 4K)
-                if len(name_list) == 4:
-                    # This is probably a Poliigon texture of either Color or Displacement
-                    if name_list[1] == 'COL' and name_list[2] == 'VAR1':
-                        images["Dif"] = image
-                    elif name_list[1] == 'COL' and name_list[2] == 'VAR2':
-                        images["Alb"] = image
-                    elif name_list[1] == 'DISP':
-                        images["Dis"] = image
-                else:
-                    # The extension we want should be before the resolution
-                    extension = name_list[-2]
                     
-            for type in suffixes.keys():
-                if extension in prefs[type].split(';'):
-                    suffix = suffixes[type]
-                    images[suffix] = image
+            # We browse the name parts until we find the texture type
+            i = 1
+            found = False
+            while i < len(name_list) + 1 and not found:
+                extension = name_list[-i]
+                for type in suffixes.keys():
+                    if extension in prefs[type].split(';'):
+                        suffix = suffixes[type]
+                        images[suffix] = image
+                        found = True
+                        break
+                i += 1
         return images
 
     def set_color_map(self, images):
@@ -633,6 +651,7 @@ class DeleteUnusedData(Operator):
     
         return {'FINISHED'}
 
+
 #--------------------------------------------------------------------------------------------------------
 # Addon Preferences
 #--------------------------------------------------------------------------------------------------------
@@ -686,7 +705,7 @@ class AddonPreferences(AddonPreferences):
         prefs["bump_suffixes"] = "Bump"
         prefs["height_suffixes"] = "Dis;Displacement;Height;DISP"
         prefs["metallic_suffixes"] = "Met;Metallic;METALNESS"
-        prefs["specular_suffixes"] = "REFL"
+        prefs["specular_suffixes"] = "Ref;REFL;Specular;Reflection"
 
 
 #--------------------------------------------------------------------------------------------------------
