@@ -371,8 +371,8 @@ class PbrNodeTree:
         PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Roughness Offset", "Roughness Offset", 1, 0, -0.5, 0.5, update)
         PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Glossiness Offset", "Glossiness Offset", 1, 0, -0.5, 0.5, update)
         PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Normal Intensity", "Normal Map", 0, 1, 0, 2, update)
-        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Bump Intensity", "Bump Intensity", 1, 0.5, 0, 2, update)
-        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Displacement Intensity", "Disp Intensity", 1, 0.3, 0, 2, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Bump Intensity", "Bump Intensity", 1, 0.3, 0, 1, update)
+        PbrNodeTree.set_single_controller("NodeSocketFloatFactor", "Displacement Intensity", "Disp Intensity", 1, 0.3, 0, 1, update)
         
     @staticmethod
     def fill_tree():
@@ -571,10 +571,11 @@ class CreateEmptyMrMaterial(Operator):
         
         PbrNodeTree.add_ao(None)
         PbrNodeTree.add_color(None)
+        PbrNodeTree.add_metallic(None)
+        PbrNodeTree.add_roughness(None)
+        PbrNodeTree.add_bump(None)
         PbrNodeTree.add_height(None)
         PbrNodeTree.add_normal(None)
-        PbrNodeTree.add_roughness(None)
-        PbrNodeTree.add_metallic(None)
         
         PbrNodeTree.set_controllers()
     
@@ -598,10 +599,11 @@ class CreateEmptySgMaterial(Operator):
         
         PbrNodeTree.add_ao(None)
         PbrNodeTree.add_color(None)
-        PbrNodeTree.add_height(None)
-        PbrNodeTree.add_normal(None)
         PbrNodeTree.add_specular(None)
         PbrNodeTree.add_glossiness(None)
+        PbrNodeTree.add_bump(None)
+        PbrNodeTree.add_height(None)
+        PbrNodeTree.add_normal(None)
         
         PbrNodeTree.set_controllers()
         
@@ -690,20 +692,20 @@ class AddonPreferences(AddonPreferences):
             layout.prop(self, "bump_suffixes")
             layout.prop(self, "height_suffixes")
             layout.prop(self, "metallic_suffixes")
-            layout.prop(self, "specular_sufixes")
+            layout.prop(self, "specular_suffixes")
 
     @staticmethod
     def init():
         """set the default values for the file suffixes"""
         prefs = bpy.context.user_preferences.addons['pbr_material_from_textures'].preferences
         prefs["diffuse_suffixes"] = "Dif;Diffuse;BaseColor;Color;COL"
-        prefs["albedo_suffixes"] = "Alb;Albedo"
-        prefs["ao_suffixes"] = "AO;Occlusion"
+        prefs["albedo_suffixes"] = "Alb;Albedo;ALBEDO"
+        prefs["ao_suffixes"] = "AO;Occlusion;OCCLUSION"
         prefs["roughness_suffixes"] = "Rou;Roughness"
         prefs["glossiness_suffixes"] = "Gloss;Glossiness;GLOSS"
-        prefs["normal_suffixes"] = "Nor;Normal;NRM"
+        prefs["normal_suffixes"] = "Nor;Normal;NRM;NORMAL"
         prefs["bump_suffixes"] = "Bump"
-        prefs["height_suffixes"] = "Dis;Displacement;Height;DISP"
+        prefs["height_suffixes"] = "Dis;Displacement;Height;DISP;DISPLACEMENT"
         prefs["metallic_suffixes"] = "Met;Metallic;METALNESS"
         prefs["specular_suffixes"] = "Ref;REFL;Specular;Reflection"
 
