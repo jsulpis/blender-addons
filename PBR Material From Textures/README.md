@@ -35,6 +35,6 @@ Three types of relief maps are supported by this add-on: normal, bump and displa
 - If there is no normal map, the bump map is connected to the Normal input of the Principled shader after a Bump node, and the displacement map is connected to the group output.
 
 ## Screenshots
-![Panel](https://raw.githubusercontent.com/jsulpis/blender-addons/master/Screenshots/material_panel.JPG)
-![Full PBR node of Specular/Glossiness workflow](https://raw.githubusercontent.com/jsulpis/blender-addons/master/Screenshots/spec-glos_group_preview.jpg)
-![Small group](https://raw.githubusercontent.com/jsulpis/blender-addons/master/Screenshots/small_group_preview.jpg)
+![Panel](https://raw.githubusercontent.com/jsulpis/blender-addons/master/PBR%20Material%20From%20Textures/Screenshots/material_panel.JPG)
+![Full PBR node of Specular/Glossiness workflow](https://raw.githubusercontent.com/jsulpis/blender-addons/master/PBR%20Material%20From%20Textures/Screenshots/spec-glos_group_preview.jpg)
+![Small group](https://raw.githubusercontent.com/jsulpis/blender-addons/master/PBR%20Material%20From%20Textures/Screenshots/small_group_preview.jpg)
