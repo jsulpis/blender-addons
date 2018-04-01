@@ -402,6 +402,7 @@ class PbrNodeTree:
 class MaterialPanel(bpy.types.Panel):
     """Create a Panel in the Material window"""
     bl_label = "PBR Material from Textures"
+    bl_idname = "MfT_Panel"
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
     bl_context = "material"
