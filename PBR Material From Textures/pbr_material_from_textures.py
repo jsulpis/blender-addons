@@ -63,7 +63,7 @@ class PBRMaterialProperties(bpy.types.PropertyGroup):
             ('6', 'Reflection', 'Vector in the direction of a sharp reflection, typically used for environment maps.')],
         description="Calculation of the texture vector",
         update=set_mapping,
-        default='0',
+        default='2',
     )
 
     projection = bpy.props.EnumProperty(
