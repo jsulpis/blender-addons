@@ -22,7 +22,7 @@ See details in the README of each add-on.
 Contributions are welcome ! Here is how to do it.
 
 1.  Fork the project (<https://github.com/jsulpis/blender-addons/fork>)
-2.  Clone it on your machine (`git clone https://github.com/jsulpis/blender-addons.git`)
+2.  Clone it on your machine (`git clone https://github.com/yourName/blender-addons.git`)
 3.  Create your feature branch (`git checkout -b feature/awesomeFeature`)
 4.  Commit your changes (`git commit -am 'Add my awesome feature'`)
 5.  Push your branch (`git push origin feature/awesomeFeature`)
